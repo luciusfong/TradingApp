@@ -261,7 +261,7 @@ export default function App() {
             )}
           </>
         )}
-        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} />}
+        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} />}
         {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} />}
       </main>
       <nav className="tabs" aria-label="Sections">

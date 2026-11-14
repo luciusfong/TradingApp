@@ -176,3 +176,114 @@ export const SIGNAL_TEXT: Record<QuantSignal, { label: string; tone: 'pos' | 'ne
   momentum: { label: 'Steady momentum', tone: 'pos', why: 'Up 20% or more over six months, above the 200-day average and not stretched.' },
   none: { label: 'No signal', tone: 'flat', why: '' },
 };
+
+// ---------- Technical: Minervini trend template (stocks) ----------
+
+export const TEMPLATE_CHECKS = [
+  'Price above 150-day and 200-day averages',
+  '150-day average above 200-day',
+  '200-day average rising for a month',
+  '50-day average above 150-day and 200-day',
+  'Price above 50-day average',
+  'At least 30% above 52-week low',
+  'Within 25% of 52-week high',
+  'Relative strength in the top 30% of this list',
+];
+export const TEMPLATE_SHORT = ['above 150/200-day', '150 over 200-day', '200-day rising', '50 over 150/200-day', 'above 50-day', '30% off low', 'near high', 'relative strength'];
+
+export interface TemplateRow {
+  symbol: string;
+  price: number;
+  checks: boolean[]; // 7 price checks, plus relative strength once ranked
+  passed: number;
+  rsRaw: number;
+  rs: number | null; // percentile 1-99 within the screened list
+  fromHigh: number; // percent below 52-week high (0 = at high)
+  fromLow: number; // percent above 52-week low
+}
+
+export function trendTemplate(symbol: string, a: number[]): TemplateRow | null {
+  if (a.length < 222) return null;
+  const p = last(a);
+  const m50 = sma(a, 50)!;
+  const m150 = sma(a, 150)!;
+  const m200 = sma(a, 200)!;
+  const m200Prev = sma(a.slice(0, -21), 200)!;
+  const hi = Math.max(...a);
+  const lo = Math.min(...a);
+  const checks = [
+    p > m150 && p > m200,
+    m150 > m200,
+    m200 > m200Prev,
+    m50 > m150 && m50 > m200,
+    p > m50,
+    p >= lo * 1.3,
+    p >= hi * 0.75,
+  ];
+  // Recent quarter counts double, as in the usual relative-strength ranking.
+  const q = [ret(a, 63), ret(a, 63, 63), ret(a, 63, 126), ret(a, Math.min(63, a.length - 190), 189)];
+  const rsRaw = 0.4 * (q[0] ?? 0) + 0.2 * (q[1] ?? 0) + 0.2 * (q[2] ?? 0) + 0.2 * (q[3] ?? 0);
+  return { symbol, price: p, checks, passed: checks.filter(Boolean).length, rsRaw, rs: null, fromHigh: (1 - p / hi) * 100, fromLow: (p / lo - 1) * 100 };
+}
+
+// Adds the relative-strength percentile; only meaningful with enough names to rank.
+export function rankTemplate(rows: TemplateRow[], minNames = 8): TemplateRow[] {
+  if (rows.length < minNames) return [...rows].sort((x, y) => y.passed - x.passed || y.rsRaw - x.rsRaw);
+  const sorted = [...rows].sort((x, y) => x.rsRaw - y.rsRaw);
+  const ranked = rows.map((r) => {
+    const rs = Math.max(1, Math.min(99, Math.round((sorted.indexOf(r) / (rows.length - 1)) * 98 + 1)));
+    const checks = [...r.checks.slice(0, 7), rs >= 70];
+    return { ...r, rs, checks, passed: checks.filter(Boolean).length };
+  });
+  return ranked.sort((x, y) => y.passed - x.passed || y.rsRaw - x.rsRaw);
+}
+
+// ---------- Technical: Turtle-style trend following (futures) ----------
+
+export interface TurtleState {
+  symbol: string;
+  price: number;
+  pos: 1 | -1 | 0;
+  days: number; // sessions in the current position
+  entry: number | null;
+  pnl: number | null; // percent since entry, signed for the position
+  exit: number | null; // close beyond this ends the position
+  breakUp: number; // close above this starts a long
+  breakDown: number; // close below this starts a short
+  dayMove: number; // average daily move, percent (sizing guide)
+}
+
+// The slower Turtle system on closing prices: enter on a 55-day breakout,
+// leave on a 20-day break the other way.
+export function turtle(symbol: string, a: number[], enterN = 55, exitN = 20): TurtleState | null {
+  if (a.length < enterN + 2) return null;
+  const hiOf = (i: number, n: number) => Math.max(...a.slice(i - n, i));
+  const loOf = (i: number, n: number) => Math.min(...a.slice(i - n, i));
+  let pos: 1 | -1 | 0 = 0;
+  let entryIdx = -1;
+  for (let i = enterN; i < a.length; i++) {
+    const c = a[i];
+    if (pos === 1 && c < loOf(i, exitN)) pos = 0;
+    else if (pos === -1 && c > hiOf(i, exitN)) pos = 0;
+    if (pos === 0) {
+      if (c > hiOf(i, enterN)) { pos = 1; entryIdx = i; }
+      else if (c < loOf(i, enterN)) { pos = -1; entryIdx = i; }
+    }
+  }
+  const n = a.length;
+  let move = 0;
+  for (let i = n - 20; i < n; i++) move += Math.abs(a[i] / a[i - 1] - 1);
+  const entry = pos !== 0 ? a[entryIdx] : null;
+  return {
+    symbol,
+    price: last(a),
+    pos,
+    days: pos !== 0 ? n - 1 - entryIdx : 0,
+    entry,
+    pnl: entry ? (last(a) / entry - 1) * 100 * pos : null,
+    exit: pos === 1 ? loOf(n, exitN) : pos === -1 ? hiOf(n, exitN) : null,
+    breakUp: hiOf(n, enterN),
+    breakDown: loOf(n, enterN),
+    dayMove: (move / 20) * 100,
+  };
+}

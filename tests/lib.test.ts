@@ -193,3 +193,92 @@ describe('screens', () => {
     expect(labelOf(holdingFor('AMD'))).toBe('AMD');
   });
 });
+
+import { trendTemplate, rankTemplate, turtle } from '../src/lib/screen';
+import { parseMetrics, rankFundamentals } from '../src/lib/fundamentals';
+import { isFuture } from '../src/lib/store';
+
+describe('technical screens', () => {
+  it('trend template passes a steady uptrend and fails a downtrend', () => {
+    const up = trendTemplate('UP', ramp(250, 100, 0.6))!;
+    expect(up.checks).toEqual([true, true, true, true, true, true, true]);
+    expect(up.fromHigh).toBeCloseTo(0);
+    const dn = trendTemplate('DN', ramp(250, 300, -0.6))!;
+    expect(dn.passed).toBe(0);
+    expect(trendTemplate('SHORT', ramp(100, 1, 1))).toBeNull();
+  });
+  it('fails only the near-high check after a deep pullback', () => {
+    const a = [...ramp(230, 100, 1), ...ramp(20, 320, -4)];
+    const r = trendTemplate('PB', a)!;
+    expect(r.checks[6]).toBe(false);
+    expect(r.checks[5]).toBe(true);
+    expect(r.checks[4]).toBe(false);
+  });
+  it('ranks relative strength only with enough names', () => {
+    const few = rankTemplate([trendTemplate('A', ramp(250, 100, 0.6))!, trendTemplate('B', ramp(250, 100, 0.1))!]);
+    expect(few[0].symbol).toBe('A');
+    expect(few[0].rs).toBeNull();
+    expect(few[0].checks.length).toBe(7);
+    const many = rankTemplate(Array.from({ length: 10 }, (_, i) => trendTemplate(`S${i}`, ramp(250, 100, 0.1 + i * 0.1))!));
+    expect(many[0].symbol).toBe('S9');
+    expect(many[0].rs).toBe(99);
+    expect(many[0].passed).toBe(8);
+    expect(many.find((r) => r.symbol === 'S0')!.rs).toBe(1);
+    expect(many.find((r) => r.symbol === 'S0')!.checks[7]).toBe(false);
+  });
+  it('turtle goes long on a breakout and exits on a 20-day low', () => {
+    const flat = Array.from({ length: 80 }, (_, i) => 100 + (i % 2));
+    expect(turtle('F', flat)!.pos).toBe(0);
+    const long = turtle('L', [...flat, 103, 104, 105, 106])!;
+    expect(long.pos).toBe(1);
+    expect(long.days).toBe(3);
+    expect(long.entry).toBe(103);
+    expect(long.pnl).toBeCloseTo((106 / 103 - 1) * 100);
+    expect(long.exit).toBe(100);
+    const out = turtle('X', [...flat, ...ramp(30, 103, 1), 110])!;
+    expect(out.pos).toBe(0);
+    expect(out.breakUp).toBe(132);
+    // A close that is both a 20-day and a 55-day low exits and reverses the same day.
+    expect(turtle('R', [...flat, 103, 104, 105, 106, 99.5])!.pos).toBe(-1);
+    const short = turtle('S', [...flat, 98, 97, 96])!;
+    expect(short.pos).toBe(-1);
+    expect(short.pnl).toBeGreaterThan(0);
+    expect(short.exit).toBe(101);
+    expect(turtle('T', [1, 2, 3])).toBeNull();
+  });
+});
+
+describe('fundamentals', () => {
+  it('scores quality at a fair price', () => {
+    const f = parseMetrics('GOOD', { peTTM: 21, epsGrowth5Y: 18, roeTTM: 32, netProfitMarginTTM: 24, 'totalDebt/totalEquityQuarterly': 0.4 });
+    expect(f.peg).toBeCloseTo(1.167, 2);
+    expect(f.quality).toEqual([true, true, true, true]);
+    expect(f.verdict).toBe('quality-fair');
+  });
+  it('separates expensive quality, cheap junk and loss-makers', () => {
+    expect(parseMetrics('A', { peTTM: 60, epsGrowth5Y: 12, roeTTM: 40, netProfitMarginTTM: 25, 'totalDebt/totalEquityQuarterly': 0.2 }).verdict).toBe('quality-pricey');
+    expect(parseMetrics('B', { peTTM: 6, epsGrowth5Y: 12, roeTTM: 5, netProfitMarginTTM: 3, 'totalDebt/totalEquityQuarterly': 3 }).verdict).toBe('cheap-weak');
+    expect(parseMetrics('C', { peTTM: null, epsGrowth5Y: -8, roeTTM: -12, netProfitMarginTTM: -20 }).verdict).toBe('no-earnings');
+    expect(parseMetrics('D', { peTTM: 45, epsGrowth5Y: 9, roeTTM: 8, netProfitMarginTTM: 6 }).verdict).toBe('pricey');
+    expect(parseMetrics('SPY', {}).verdict).toBe('no-data');
+  });
+  it('falls back across fields and normalises percent debt ratios', () => {
+    const f = parseMetrics('E', { peNormalizedAnnual: 15, epsGrowth3Y: 15, roe5Y: 20, 'totalDebt/totalEquityAnnual': 85 });
+    expect(f.pe).toBe(15);
+    expect(f.growthBasis).toBe('3-year');
+    expect(f.debtEquity).toBeCloseTo(0.85);
+    expect(f.qualityKnown).toBe(3);
+    expect(f.verdict).toBe('quality-fair');
+  });
+  it('ranks best verdicts first', () => {
+    const rows = rankFundamentals([parseMetrics('D', { peTTM: 45, epsGrowth5Y: 9 }), parseMetrics('G', { peTTM: 21, epsGrowth5Y: 18, roeTTM: 32, netProfitMarginTTM: 24, 'totalDebt/totalEquityQuarterly': 0.4 })]);
+    expect(rows[0].symbol).toBe('G');
+  });
+  it('knows futures from stocks', () => {
+    expect(isFuture('CL=F')).toBe(true);
+    expect(isFuture('DX-Y.NYB')).toBe(true);
+    expect(isFuture('SI=F')).toBe(true);
+    expect(isFuture('AAPL')).toBe(false);
+    expect(isFuture('BRK-B')).toBe(false);
+  });
+});

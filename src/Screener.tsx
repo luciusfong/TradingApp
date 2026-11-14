@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { errorText } from './lib/http';
 import { getSeries } from './lib/market';
-import { macroRead, macroRow, quantRow, SIGNAL_TEXT, type MacroRow, type QuantRow, type Trend } from './lib/screen';
-import { CATALOG, holdingFor, labelOf, LARGE_CAPS, MACRO_SET, type Holding } from './lib/store';
+import { getFundamentals, isCached, QUALITY_CHECKS, rankFundamentals, VERDICT_TEXT, type Fundamentals } from './lib/fundamentals';
+import { macroRead, macroRow, quantRow, rankTemplate, SIGNAL_TEXT, TEMPLATE_SHORT, trendTemplate, turtle, type MacroRow, type QuantRow, type TemplateRow, type Trend, type TurtleState } from './lib/screen';
+import { CATALOG, holdingFor, isFuture, labelOf, LARGE_CAPS, MACRO_SET, type Holding } from './lib/store';
 
-type Mode = 'macro' | 'quant';
+type Mode = 'macro' | 'quant' | 'tech' | 'funda';
+const MODE_NAME: Record<Mode, string> = { macro: 'Macro', quant: 'Quant', tech: 'Technical', funda: 'Fundamental' };
 type Universe = 'watchlist' | 'large';
 
 // One year of daily closes per symbol, kept for 15 minutes so switching views is instant.
 const cache = new Map<string, { closes: number[]; at: number }>();
 const TTL = 15 * 60_000;
 let handledNonce = 0;
+let fundaNonce = 0;
 
 async function closesFor(symbol: string, force: boolean): Promise<number[]> {
   const hit = cache.get(symbol);
@@ -78,31 +81,49 @@ function Spark({ data, label }: { data: number[]; label: string }) {
   );
 }
 
-export function Screener({ list, onOpen }: { list: Holding[]; onOpen: (symbol: string) => void }) {
+export function Screener({ list, onOpen, finnhubKey, onSettings }: { list: Holding[]; onOpen: (symbol: string) => void; finnhubKey: string; onSettings: () => void }) {
   const [mode, setMode] = useState<Mode>('macro');
   const [universe, setUniverse] = useState<Universe>('watchlist');
   const [nonce, setNonce] = useState(0);
 
-  const symbols = useMemo(
-    () => (mode === 'macro' ? MACRO_SET : universe === 'large' ? LARGE_CAPS : list.map((h) => h.symbol)),
-    [mode, universe, list],
+  const stocks = useMemo(
+    () => (universe === 'large' ? LARGE_CAPS : list.map((h) => h.symbol).filter((s) => !isFuture(s))),
+    [universe, list],
   );
+  const futures = useMemo(() => [...new Set([...MACRO_SET, ...list.map((h) => h.symbol).filter(isFuture)])], [list]);
+  const symbols = useMemo(() => {
+    if (mode === 'macro') return MACRO_SET;
+    if (mode === 'quant') return universe === 'large' ? LARGE_CAPS : list.map((h) => h.symbol);
+    if (mode === 'tech') return [...stocks, ...futures];
+    return [];
+  }, [mode, universe, list, stocks, futures]);
   const st = useCloses(symbols, nonce);
   const name = (s: string) => list.find((h) => h.symbol === s) ?? holdingFor(s);
+  const pick = (
+    <div className="ranges" role="group" aria-label="Stocks to screen">
+      <button aria-pressed={universe === 'watchlist'} onClick={() => setUniverse('watchlist')}>My watchlist</button>
+      <button aria-pressed={universe === 'large'} onClick={() => setUniverse('large')}>30 large caps</button>
+    </div>
+  );
 
   return (
     <>
-      <div className="ranges" role="group" aria-label="Screen type">
-        <button aria-pressed={mode === 'macro'} onClick={() => setMode('macro')}>Macro</button>
-        <button aria-pressed={mode === 'quant'} onClick={() => setMode('quant')}>Quant</button>
-        <span className="grow" />
-        <button className="link" onClick={() => setNonce((n) => n + 1)}>{st.loading ? `Loading ${st.done}/${symbols.length}` : 'Refresh'}</button>
+      <div className="modes" role="group" aria-label="Screen type">
+        {(Object.keys(MODE_NAME) as Mode[]).map((m) => (
+          <button key={m} aria-pressed={mode === m} onClick={() => setMode(m)}>{MODE_NAME[m]}</button>
+        ))}
       </div>
-      {st.error && <div className="err">{st.error}</div>}
-      {!st.error && st.failed > 0 && !st.loading && <p className="note">{st.failed} of {symbols.length} symbols could not be loaded.</p>}
-      {mode === 'macro'
-        ? <Macro data={st.data} onOpen={onOpen} loading={st.loading} />
-        : <Quant data={st.data} symbols={symbols} name={name} onOpen={onOpen} universe={universe} setUniverse={setUniverse} loading={st.loading} />}
+      {mode !== 'funda' && (
+        <div className="refresh">
+          <button className="link" onClick={() => setNonce((n) => n + 1)}>{st.loading ? `Loading ${st.done} of ${symbols.length}` : 'Refresh prices'}</button>
+        </div>
+      )}
+      {mode !== 'funda' && st.error && <div className="err">{st.error}</div>}
+      {mode !== 'funda' && !st.error && st.failed > 0 && !st.loading && <p className="note">{st.failed} of {symbols.length} symbols could not be loaded.</p>}
+      {mode === 'macro' && <Macro data={st.data} onOpen={onOpen} loading={st.loading} />}
+      {mode === 'quant' && <Quant data={st.data} symbols={symbols} name={name} onOpen={onOpen} pick={pick} loading={st.loading} />}
+      {mode === 'tech' && <Technical data={st.data} stocks={stocks} futures={futures} name={name} onOpen={onOpen} pick={pick} loading={st.loading} />}
+      {mode === 'funda' && <Fundamental stocks={stocks} name={name} onOpen={onOpen} pick={pick} finnhubKey={finnhubKey} onSettings={onSettings} />}
     </>
   );
 }
@@ -162,7 +183,7 @@ function Macro({ data, onOpen, loading }: { data: Record<string, number[]>; onOp
 
 function Quant(p: {
   data: Record<string, number[]>; symbols: string[]; name: (s: string) => Holding; onOpen: (s: string) => void;
-  universe: Universe; setUniverse: (u: Universe) => void; loading: boolean;
+  pick: React.ReactNode; loading: boolean;
 }) {
   const rows = useMemo(() => {
     const out: QuantRow[] = [];
@@ -175,10 +196,7 @@ function Quant(p: {
   return (
     <>
       <p className="note">Statistical screen in the spirit of Jim Simons: ignore the story, rank by numbers. Short-term stretch (z-score, RSI) checked against the long-term trend, plus 6-month momentum.</p>
-      <div className="ranges" role="group" aria-label="Universe">
-        <button aria-pressed={p.universe === 'watchlist'} onClick={() => p.setUniverse('watchlist')}>My watchlist</button>
-        <button aria-pressed={p.universe === 'large'} onClick={() => p.setUniverse('large')}>30 large caps</button>
-      </div>
+      {p.pick}
       <div className="section-h"><h2>Signals</h2><span className="hint">{hits.length} of {rows.length}</span></div>
       {hits.length === 0 && <p className="note">{p.loading ? 'Scanning' : 'Nothing is statistically stretched right now. That is the normal state on most days.'}</p>}
       <ul className="ledger">
@@ -228,5 +246,176 @@ function Stats({ r, short }: { r: QuantRow; short?: boolean }) {
       <span className={tone(r.mom)}>{pct(r.mom, 0)}{short ? '' : ' 6-mo'}</span>
       {!short && <span>Vol {r.vol === null ? '—' : `${r.vol.toFixed(0)}%`}</span>}
     </span>
+  );
+}
+
+const px = (v: number) => {
+  const d = Math.abs(v) >= 1000 ? 0 : 2;
+  return v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+};
+
+function Technical(p: {
+  data: Record<string, number[]>; stocks: string[]; futures: string[]; name: (s: string) => Holding;
+  onOpen: (s: string) => void; pick: React.ReactNode; loading: boolean;
+}) {
+  const template = useMemo(() => {
+    const rows: TemplateRow[] = [];
+    for (const s of p.stocks) { const r = p.data[s] && trendTemplate(s, p.data[s]); if (r) rows.push(r); }
+    return rankTemplate(rows);
+  }, [p.data, p.stocks]);
+  const trends = useMemo(() => {
+    const rows: TurtleState[] = [];
+    for (const s of p.futures) { const r = p.data[s] && turtle(s, p.data[s]); if (r) rows.push(r); }
+    return rows.sort((a, b) => Math.abs(b.pos) - Math.abs(a.pos) || b.days - a.days);
+  }, [p.data, p.futures]);
+  const total = template[0]?.checks.length ?? 7;
+  const full = template.filter((r) => r.passed === total).length;
+
+  return (
+    <>
+      <p className="note">Two rule sets: Mark Minervini's trend template to find stocks in a confirmed uptrend, and a Turtle-style breakout rule (Richard Dennis) for futures.</p>
+      {p.pick}
+      <div className="section-h"><h2>Stocks: trend template</h2><span className="hint">{full} of {template.length} pass all {total}</span></div>
+      {template.length === 0 && <p className="note">{p.loading ? 'Scanning' : p.stocks.length ? 'Needs about a year of price history per stock.' : 'No stocks on your watchlist. Switch to 30 large caps.'}</p>}
+      <ul className="ledger">
+        {template.map((r) => {
+          const h = p.name(r.symbol);
+          const fails = r.checks.map((ok, i) => (ok ? null : TEMPLATE_SHORT[i])).filter(Boolean);
+          const all = r.passed === total;
+          return (
+            <li key={r.symbol}>
+              <button className="qrow" onClick={() => p.onOpen(r.symbol)}>
+                <span className="who"><span className="sym">{labelOf(h)}</span><span className="name">{h.name}</span></span>
+                <span className={`tr ${all ? 'pos' : r.passed <= total / 2 ? 'neg' : 'flat'}`}>{all ? '▲ ' : ''}{r.passed} of {total} checks</span>
+                {fails.length > 0 && <span className="why">Fails: {fails.join(', ')}.</span>}
+                <span className="stats num">
+                  {r.rs !== null && <span>RS {r.rs}</span>}
+                  <span>{r.fromHigh < 0.05 ? 'At 52-week high' : `${r.fromHigh.toFixed(0)}% below high`}</span>
+                  <span>{r.fromLow.toFixed(0)}% above low</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {template.length > 0 && template[0].rs === null && <p className="note">Relative strength is skipped with fewer than 8 stocks, so 7 checks apply. Use 30 large caps for the full 8.</p>}
+
+      <div className="section-h"><h2>Futures: trend following</h2><span className="hint">55-day entry, 20-day exit</span></div>
+      <ul className="ledger">
+        {trends.map((t) => {
+          const h = p.name(t.symbol);
+          return (
+            <li key={t.symbol}>
+              <button className="qrow" onClick={() => p.onOpen(t.symbol)}>
+                <span className="who"><span className="sym">{labelOf(h)}</span><span className="name">{h.name}</span></span>
+                <span className={`tr ${t.pos === 1 ? 'pos' : t.pos === -1 ? 'neg' : 'flat'}`}>
+                  {t.pos === 1 ? `▲ Long, ${t.days} days` : t.pos === -1 ? `▼ Short, ${t.days} days` : '◆ No position'}
+                </span>
+                <span className="why num">
+                  {t.pos !== 0
+                    ? `Entered at ${px(t.entry!)}, now ${px(t.price)} (${pct(t.pnl)}). Exits on a close ${t.pos === 1 ? 'below' : 'above'} ${px(t.exit!)}.`
+                    : `Now ${px(t.price)}. Goes long on a close above ${px(t.breakUp)}, short below ${px(t.breakDown)}.`}
+                </span>
+                <span className="stats num"><span>Average daily move {t.dayMove.toFixed(1)}%</span></span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {trends.length === 0 && <p className="note">{p.loading ? 'Scanning' : 'No futures data.'}</p>}
+      <p className="fine pad">
+        The trend template is from Minervini's published criteria; relative strength here is ranked only within the list being screened.
+        The futures rule uses closing prices and no position sizing, and simple breakout rules have earned far less since the 1990s than they did for the original Turtles. Neither is backtested in this app. Not investment advice.
+      </p>
+    </>
+  );
+}
+
+function Fundamental(p: {
+  stocks: string[]; name: (s: string) => Holding; onOpen: (s: string) => void; pick: React.ReactNode;
+  finnhubKey: string; onSettings: () => void;
+}) {
+  const [state, setState] = useState<{ rows: Fundamentals[]; done: number; failed: number; error?: string; loading: boolean }>({ rows: [], done: 0, failed: 0, loading: false });
+  const [nonce, setNonce] = useState(0);
+  const keyStr = p.stocks.join(',');
+  useEffect(() => {
+    if (!p.finnhubKey) return;
+    let live = true;
+    const rows: Fundamentals[] = [];
+    let failed = 0;
+    let firstError: string | undefined;
+    const force = nonce !== fundaNonce;
+    fundaNonce = nonce;
+    setState({ rows: [], done: 0, failed: 0, loading: p.stocks.length > 0 });
+    (async () => {
+      for (let i = 0; i < p.stocks.length; i++) {
+        const wait = force || !isCached(p.stocks[i]);
+        try { rows.push(await getFundamentals(p.stocks[i], p.finnhubKey, force)); }
+        catch (e) { failed++; firstError ??= errorText(e); }
+        if (!live) return;
+        setState({ rows: [...rows], done: i + 1, failed, loading: i + 1 < p.stocks.length, error: failed === i + 1 ? firstError : undefined });
+        if (wait) await new Promise((r) => setTimeout(r, 250));
+      }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyStr, p.finnhubKey, nonce]);
+
+  const intro = <p className="note">Peter Lynch's test (is the P/E justified by growth?) combined with Warren Buffett's (is it a high-quality business with little debt?).</p>;
+  if (!p.finnhubKey) {
+    return (
+      <>
+        {intro}
+        <div className="empty-state">
+          <b>Add a Finnhub key to load company financials</b>
+          <span>Earnings, margins and debt come from Finnhub. The key is free at finnhub.io and stays on this phone.</span>
+          <button className="btn" onClick={p.onSettings}>Open Settings</button>
+        </div>
+      </>
+    );
+  }
+  const ranked = rankFundamentals(state.rows);
+  const f1 = (v: number | null, suffix = '') => (v === null ? '—' : `${v.toFixed(Math.abs(v) >= 100 ? 0 : 1)}${suffix}`);
+  return (
+    <>
+      {intro}
+      {p.pick}
+      <div className="refresh">
+        <button className="link" onClick={() => setNonce((n) => n + 1)}>{state.loading ? `Loading ${state.done} of ${p.stocks.length}` : 'Refresh financials'}</button>
+      </div>
+      {state.error && <div className="err">{state.error}</div>}
+      {!state.error && state.failed > 0 && !state.loading && <p className="note">{state.failed} of {p.stocks.length} stocks could not be loaded.</p>}
+      {p.stocks.length === 0 && <p className="note">No stocks on your watchlist. Switch to 30 large caps.</p>}
+      <ul className="ledger">
+        {ranked.map((f) => {
+          const h = p.name(f.symbol);
+          const v = VERDICT_TEXT[f.verdict];
+          const fails = f.quality.map((ok, i) => (ok ? null : QUALITY_CHECKS[i])).filter(Boolean);
+          return (
+            <li key={f.symbol}>
+              <button className="qrow" onClick={() => p.onOpen(f.symbol)}>
+                <span className="who"><span className="sym">{labelOf(h)}</span><span className="name">{h.name}</span></span>
+                <span className={`tr ${v.tone}`}>{v.label}</span>
+                <span className="why">{v.why}{f.verdict !== 'no-data' && f.qualityKnown > 0 && fails.length > 0 && fails.length < 4 ? ` Not met: ${fails.join('; ').toLowerCase()}.` : ''}</span>
+                {f.verdict !== 'no-data' && (
+                  <span className="stats num wrap">
+                    <span>P/E {f1(f.pe)}</span>
+                    <span>Growth {f1(f.growth, '%')}</span>
+                    <span>PEG {f.peg === null ? '—' : f.peg.toFixed(2)}</span>
+                    <span>ROE {f1(f.roe, '%')}</span>
+                    <span>Margin {f1(f.margin, '%')}</span>
+                    <span>Debt/equity {f.debtEquity === null ? '—' : f.debtEquity.toFixed(2)}</span>
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="fine pad">
+        PEG is the P/E divided by yearly earnings growth (5-year where available). Quality checks: return on equity 15% or more, net margin 10% or more,
+        debt no more than equity, earnings growing. These ratios mislead for banks and insurers, where debt is the business, and for companies with large buybacks, which inflate return on equity. Not investment advice.
+      </p>
+    </>
   );
 }

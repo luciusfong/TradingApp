@@ -18,6 +18,8 @@ const ALIAS: Record<string, string> = {
 };
 export const MACRO_SET = ['NQ=F', 'ES=F', 'UB=F', 'ZN=F', 'DX-Y.NYB', 'GC=F', 'CL=F', 'HG=F'];
 export const LARGE_CAPS = 'AAPL MSFT NVDA AMZN GOOGL META TSLA AVGO BRK-B JPM LLY V UNH XOM MA COST HD PG JNJ NFLX BAC CRM ORCL AMD KO PEP WMT DIS INTC BA'.split(' ');
+// Futures, indexes and currencies have no company behind them.
+export const isFuture = (symbol: string) => !!CATALOG[symbol] || /=F$|=X$|\.NYB$|^\^/.test(symbol);
 export const labelOf = (h: Holding) => h.label ?? h.symbol;
 export const holdingFor = (symbol: string): Holding => CATALOG[symbol] ?? { symbol };
 export interface Settings { finnhubKey: string; hideLowValue: boolean }
