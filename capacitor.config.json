@@ -1,0 +1,6 @@
+{
+  "appId": "com.zlhng.tradingapp",
+  "appName": "TradingApp",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false }
+}
