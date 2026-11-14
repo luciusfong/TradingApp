@@ -158,10 +158,10 @@ async function finnhubNews(symbol: string, key: string): Promise<RawItem[]> {
   })).filter((n) => n.title && n.url);
 }
 
-export async function tickerNews(symbol: string, name: string | undefined, finnhubKey: string): Promise<NewsItem[]> {
-  const q = name ? `"${symbol}" OR "${name}" stock when:3d` : `${symbol} stock when:3d`;
+export async function tickerNews(symbol: string, name: string | undefined, finnhubKey: string, customQuery?: string): Promise<NewsItem[]> {
+  const q = customQuery ?? (name ? `"${symbol}" OR "${name}" stock when:3d` : `${symbol} stock when:3d`);
   const jobs: Promise<RawItem[]>[] = [fetchRss(q)];
-  if (finnhubKey) jobs.push(finnhubNews(symbol, finnhubKey));
+  if (finnhubKey && !customQuery) jobs.push(finnhubNews(symbol, finnhubKey));
   const res = await Promise.allSettled(jobs);
   const raw = res.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
   if (!raw.length && res.every((r) => r.status === 'rejected')) throw (res[0] as PromiseRejectedResult).reason;

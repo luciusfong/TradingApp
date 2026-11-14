@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chart } from './Chart';
+import { Screener } from './Screener';
 import { errorText } from './lib/http';
 import { getQuote, getSeries, lookupName, type Quote, type Range, type Series } from './lib/market';
 import { marketNews, tickerNews, type NewsItem } from './lib/news';
 import { aggregate, type Label } from './lib/sentiment';
-import { cleanSymbol, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
+import { cleanSymbol, holdingFor, labelOf, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
 
-type Tab = 'watchlist' | 'news' | 'settings';
+type Tab = 'watchlist' | 'screener' | 'news' | 'settings';
+const TAB_NAME: Record<Tab, string> = { watchlist: 'Watchlist', screener: 'Screener', news: 'Market news', settings: 'Settings' };
 type Load<T> = { data?: T; error?: string; loading: boolean; at?: number };
 
 const money = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -93,6 +95,7 @@ export default function App() {
   const [quotes, setQuotes] = useState<Record<string, Load<Quote>>>({});
   const [news, setNews] = useState<Record<string, Load<NewsItem[]>>>({});
   const [market, setMarket] = useState<Load<NewsItem[]>>({ loading: false });
+  const [editing, setEditing] = useState(false);
   const key = settings.finnhubKey;
   const listRef = useRef(list);
   listRef.current = list;
@@ -110,7 +113,7 @@ export default function App() {
         }
       })
       .catch((e) => setQuotes((q) => ({ ...q, [s]: { data: q[s]?.data, error: errorText(e), loading: false } })));
-    tickerNews(s, h.name, key)
+    tickerNews(s, h.name, key, h.q)
       .then((data) => setNews((n) => ({ ...n, [s]: { data, loading: false, at: Date.now() } })))
       .catch((e) => setNews((n) => ({ ...n, [s]: { data: n[s]?.data, error: errorText(e), loading: false } })));
   }, [key]);
@@ -131,16 +134,21 @@ export default function App() {
   useEffect(() => { if (tab === 'news' && !market.data && !market.loading) loadMarket(); }, [tab, market.data, market.loading, loadMarket]);
 
   const detail = hash.startsWith('t/') ? cleanSymbol(decodeURIComponent(hash.slice(2))) : '';
-  const holding = list.find((h) => h.symbol === detail);
+  const inList = list.some((h) => h.symbol === detail);
+  const holding = detail ? list.find((h) => h.symbol === detail) ?? holdingFor(detail) : undefined;
+  // Opened from the screener: not on the watchlist, so nothing has loaded it yet.
+  useEffect(() => {
+    if (detail && !inList) loadSymbol(holdingFor(detail));
+  }, [detail, inList, loadSymbol]);
 
   const addSymbol = async (raw: string): Promise<string | null> => {
     const symbol = cleanSymbol(raw);
     if (!symbol) return 'Type a ticker symbol, like AMD.';
-    if (list.some((h) => h.symbol === symbol)) return `${symbol} is already on your watchlist.`;
+    if (list.some((h) => h.symbol === symbol)) return `${labelOf(holdingFor(symbol))} is already on your watchlist.`;
     try {
       const q = await getQuote(symbol, key);
       const name = q.name ?? (await lookupName(symbol, key));
-      const h = { symbol, name };
+      const h: Holding = { name, ...holdingFor(symbol) };
       const next = [...list, h];
       setList(next); saveWatchlist(next);
       setQuotes((s) => ({ ...s, [symbol]: { data: q, loading: false, at: Date.now() } }));
@@ -150,10 +158,16 @@ export default function App() {
       return errorText(e);
     }
   };
-  const removeSymbol = (symbol: string) => {
+  const removeSymbol = (symbol: string, goBack = false) => {
     const next = list.filter((h) => h.symbol !== symbol);
     setList(next); saveWatchlist(next);
-    history.back();
+    if (!next.length) setEditing(false);
+    if (goBack) history.back();
+  };
+  const addHolding = (h: Holding) => {
+    if (list.some((x) => x.symbol === h.symbol)) return;
+    const next = [...list, h];
+    setList(next); saveWatchlist(next);
   };
   const updateSettings = (s: Settings) => { setSettings(s); saveSettings(s); };
 
@@ -166,7 +180,9 @@ export default function App() {
         hideLow={settings.hideLowValue}
         onToggleLow={() => updateSettings({ ...settings, hideLowValue: !settings.hideLowValue })}
         onRefresh={() => loadSymbol(holding)}
-        onRemove={() => removeSymbol(detail)}
+        inList={inList}
+        onRemove={() => removeSymbol(detail, true)}
+        onAdd={() => addHolding({ ...holding, name: holding.name ?? quotes[detail]?.data?.name })}
       />
     );
   }
@@ -175,8 +191,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="top">
-        <h1>{tab === 'watchlist' ? 'Watchlist' : tab === 'news' ? 'Market news' : 'Settings'}</h1>
-        {tab === 'watchlist' && <button className="stamp" onClick={refreshAll}>{newest ? `Updated ${ago(newest)}` : 'Loading'} · Refresh</button>}
+        <h1>{TAB_NAME[tab]}</h1>
+        {tab === 'watchlist' && (
+          <span className="acts">
+            {!editing && <button className="stamp" onClick={refreshAll}>{newest ? `Updated ${ago(newest)}` : 'Loading'} · Refresh</button>}
+            {list.length > 0 && <button className="stamp strong" onClick={() => setEditing(!editing)}>{editing ? 'Done' : 'Edit'}</button>}
+          </span>
+        )}
         {tab === 'news' && <button className="stamp" onClick={loadMarket}>{market.loading ? 'Loading' : market.at ? `Updated ${ago(market.at)}` : ''} · Refresh</button>}
       </header>
       <main className="body">
@@ -190,8 +211,14 @@ export default function App() {
                 const visible = n?.data?.filter((x) => !(settings.hideLowValue && x.lowValue)) ?? [];
                 return (
                   <li key={h.symbol}>
+                    {editing ? (
+                      <div className="row edit">
+                        <span><span className="sym">{labelOf(h)}</span><span className="name">{h.name}</span></span>
+                        <button className="del" onClick={() => removeSymbol(h.symbol)} aria-label={`Remove ${labelOf(h)} from watchlist`}>Remove</button>
+                      </div>
+                    ) : (
                     <button className="row" onClick={() => go(`t/${encodeURIComponent(h.symbol)}`)}>
-                      <span><span className="sym">{h.symbol}</span><span className="name">{h.name}</span></span>
+                      <span><span className="sym">{labelOf(h)}</span><span className="name">{h.name}</span></span>
                       <span className="px num">{q?.data ? money(q.data.price) : q?.error ? '—' : <span className="skel spin">…</span>}</span>
                       <span className="mood">
                         {mood && visible.length ? (
@@ -209,6 +236,7 @@ export default function App() {
                         {q?.data ? `${arrow(q.data.change)} ${signed(q.data.changePct)}%` : q?.error ? 'No quote' : ''}
                       </span>
                     </button>
+                    )}
                   </li>
                 );
               })}
@@ -216,6 +244,7 @@ export default function App() {
             {Object.values(quotes).find((q) => q.error && !q.data) && (
               <div className="err">{Object.values(quotes).find((q) => q.error && !q.data)!.error}</div>
             )}
+            {list.length === 0 && <p className="note">Your watchlist is empty. Add a ticker below.</p>}
             <AddForm onAdd={addSymbol} />
             <p className="note">Bars show each recent headline, oldest to newest. Blue is positive, orange is negative, grey is neutral.</p>
           </>
@@ -232,12 +261,13 @@ export default function App() {
             )}
           </>
         )}
+        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} />}
         {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} />}
       </main>
       <nav className="tabs" aria-label="Sections">
-        {(['watchlist', 'news', 'settings'] as Tab[]).map((t) => (
-          <button key={t} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}>
-            {t === 'watchlist' ? 'Watchlist' : t === 'news' ? 'Market news' : 'Settings'}
+        {(['watchlist', 'screener', 'news', 'settings'] as Tab[]).map((t) => (
+          <button key={t} aria-current={tab === t ? 'page' : undefined} onClick={() => { setTab(t); setEditing(false); }}>
+            {t === 'news' ? 'News' : TAB_NAME[t]}
           </button>
         ))}
       </nav>
@@ -262,7 +292,7 @@ function AddForm({ onAdd }: { onAdd: (s: string) => Promise<string | null> }) {
           if (!err) setValue('');
         }}
       >
-        <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="Ticker, e.g. AMD" aria-label="Ticker symbol" autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
+        <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="Ticker, e.g. AMD or ESmain" aria-label="Ticker symbol" autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
         <button className="btn" disabled={busy || !value.trim()}>{busy ? 'Adding' : 'Add ticker'}</button>
       </form>
       {error && <div className="err">{error}</div>}
@@ -295,7 +325,7 @@ function MoodCard({ items, hideLow, title }: { items: NewsItem[]; hideLow: boole
 
 function Detail(p: {
   holding: Holding; quote?: Load<Quote>; news?: Load<NewsItem[]>; hideLow: boolean;
-  onToggleLow: () => void; onRefresh: () => void; onRemove: () => void;
+  onToggleLow: () => void; onRefresh: () => void; onRemove: () => void; onAdd: () => void; inList: boolean;
 }) {
   const [range, setRange] = useState<Range>('1D');
   const [series, setSeries] = useState<Load<Series>>({ loading: true });
@@ -314,12 +344,12 @@ function Detail(p: {
   return (
     <div className="app">
       <header className="top">
-        <button className="back" onClick={() => history.back()}>‹ Watchlist</button>
+        <button className="back" onClick={() => history.back()}>‹ Back</button>
         <button className="stamp" onClick={p.onRefresh}>{p.quote?.loading ? 'Loading' : q ? `Price ${ago(q.time)}` : ''} · Refresh</button>
       </header>
       <main className="body">
         <div className="hero">
-          <div className="co">{symbol}{p.holding.name ? `, ${p.holding.name}` : ''}</div>
+          <div className="co">{labelOf(p.holding)}{p.holding.name ? `, ${p.holding.name}` : ''}</div>
           <div className="px num">{q ? money(q.price) : '—'}</div>
           {q && <div className={`chg num ${dir(q.change)}`}>{arrow(q.change)} {signed(q.change)} ({signed(q.changePct)}%) today</div>}
           {p.quote?.error && !q && <div className="err" style={{ margin: '10px 0' }}>{p.quote.error}</div>}
@@ -340,7 +370,9 @@ function Detail(p: {
         {p.news?.error && <div className="err">{p.news.error}</div>}
         {p.news?.loading && !p.news.data && <p className="note spin">Reading headlines</p>}
         {p.news?.data && <NewsList items={p.news.data} hideLow={p.hideLow} />}
-        <button className="remove" onClick={p.onRemove}>Remove {symbol} from watchlist</button>
+        {p.inList
+          ? <button className="remove" onClick={p.onRemove}>Remove {labelOf(p.holding)} from watchlist</button>
+          : <button className="remove add" onClick={p.onAdd}>Add {labelOf(p.holding)} to watchlist</button>}
       </main>
     </div>
   );

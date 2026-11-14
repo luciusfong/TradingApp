@@ -130,3 +130,66 @@ describe('market parsers', () => {
     expect(cleanSymbol('aapl; drop')).toBe('AAPLDROP');
   });
 });
+
+import { sma, ret, zscore, rsi, annualVol, trendOf, macroRow, macroRead, quantRow } from '../src/lib/screen';
+import { CATALOG, holdingFor, labelOf } from '../src/lib/store';
+
+const ramp = (n: number, start: number, step: number) => Array.from({ length: n }, (_, i) => start + i * step);
+
+describe('screens', () => {
+  it('basic statistics', () => {
+    expect(sma([1, 2, 3, 4], 2)).toBe(3.5);
+    expect(sma([1], 2)).toBeNull();
+    expect(ret([100, 110], 1)).toBeCloseTo(10);
+    expect(ret([100, 110, 121], 1, 1)).toBeCloseTo(10);
+    expect(ret([100], 5)).toBeNull();
+    expect(zscore([...Array(19).fill(10), 10], 20)).toBe(0);
+    expect(zscore([...ramp(19, 100, 0.1), 80], 20)!).toBeLessThan(-2);
+    expect(annualVol(Array(30).fill(50), 20)).toBe(0);
+  });
+  it('RSI(2) hits the extremes', () => {
+    expect(rsi(ramp(10, 100, 1), 2)).toBe(100);
+    expect(rsi(ramp(10, 100, -1), 2)).toBeCloseTo(0);
+    expect(rsi([1, 1, 1, 1], 2)).toBe(50);
+  });
+  it('classifies trend', () => {
+    expect(trendOf(ramp(250, 100, 0.5))).toBe('up');
+    expect(trendOf(ramp(250, 300, -0.5))).toBe('down');
+    expect(trendOf([...ramp(200, 100, 0.5), ...ramp(50, 200, -1.2)])).toBe('mixed');
+  });
+  it('reads the macro backdrop', () => {
+    const up = (s: string) => macroRow(s, ramp(250, 100, 0.5));
+    const dn = (s: string) => macroRow(s, ramp(250, 300, -0.5));
+    const easing = macroRead({ 'UB=F': up('UB=F'), 'DX-Y.NYB': dn('DX-Y.NYB'), 'NQ=F': up('NQ=F'), 'GC=F': up('GC=F'), 'CL=F': dn('CL=F'), 'HG=F': up('HG=F') });
+    expect(easing[0].title).toBe('Liquidity is easing');
+    expect(easing[1].text).toMatch(/agrees with the liquidity/);
+    expect(easing.some((r) => r.title === 'Gold is leading')).toBe(true);
+    expect(easing.some((r) => r.title === 'Growth signal is positive')).toBe(true);
+    const tight = macroRead({ 'UB=F': dn('UB=F'), 'DX-Y.NYB': up('DX-Y.NYB'), 'NQ=F': up('NQ=F') });
+    expect(tight[0].title).toBe('Liquidity is tightening');
+    expect(tight[1].text).toMatch(/against liquidity/);
+    expect(macroRead({})).toEqual([]);
+    expect(up('X').r1m).toBeGreaterThan(0);
+    expect(up('X').spark.length).toBe(63);
+  });
+  it('finds quant signals', () => {
+    const dip = quantRow('A', [...ramp(245, 100, 0.5), 215, 208, 200, 196, 192]);
+    expect(dip.signal).toBe('dip-uptrend');
+    const spike = quantRow('B', [...ramp(245, 300, -0.5), 185, 192, 199, 204, 208]);
+    expect(spike.signal).toBe('spike-downtrend');
+    const calm = quantRow('C', Array.from({ length: 250 }, (_, i) => 100 + Math.sin(i / 3)));
+    expect(calm.signal).toBe('none');
+    expect(dip.strength).toBeGreaterThan(calm.strength);
+    expect(quantRow('D', [10, 11]).z).toBeNull();
+  });
+  it('maps broker-style names to data symbols', () => {
+    expect(cleanSymbol('clmain')).toBe('CL=F');
+    expect(cleanSymbol('NQmain')).toBe('NQ=F');
+    expect(cleanSymbol('ubmain')).toBe('UB=F');
+    expect(cleanSymbol('GCMAIN')).toBe('GC=F');
+    expect(cleanSymbol('usdindex')).toBe('DX-Y.NYB');
+    expect(cleanSymbol('dxy')).toBe('DX-Y.NYB');
+    expect(labelOf(CATALOG['CL=F'])).toBe('CLmain');
+    expect(labelOf(holdingFor('AMD'))).toBe('AMD');
+  });
+});
