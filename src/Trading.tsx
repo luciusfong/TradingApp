@@ -11,20 +11,23 @@ const signed = (v: number, d = 2) => `${v > 0.004 ? '+' : v < -0.004 ? '−' : '
 const tone = (v: number) => (v > 0.004 ? 'pos' : v < -0.004 ? 'neg' : 'flat');
 const when = (t: number) => new Date(t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-export function Trading({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: string; onOpen: (symbol: string) => void }) {
+export function Trading({ list, finnhubKey, onOpen, info, onToggleInfo }: {
+  list: Holding[]; finnhubKey: string; onOpen: (symbol: string) => void; info: boolean; onToggleInfo: () => void;
+}) {
   const [book, setBook] = useState<Book>('paper');
   return (
     <>
       <div className="modes" role="group" aria-label="Account">
         <button aria-pressed={book === 'paper'} onClick={() => setBook('paper')}>Paper</button>
         <button aria-pressed={book === 'live'} onClick={() => setBook('live')}>Live</button>
+        <button className="info" aria-pressed={info} aria-label={info ? 'Hide explanations' : 'Show explanations'} onClick={onToggleInfo}>Info</button>
       </div>
-      {book === 'paper' ? <Paper list={list} finnhubKey={finnhubKey} onOpen={onOpen} /> : <Live />}
+      {book === 'paper' ? <Paper list={list} finnhubKey={finnhubKey} onOpen={onOpen} info={info} /> : <Live />}
     </>
   );
 }
 
-function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: string; onOpen: (symbol: string) => void }) {
+function Paper({ list, finnhubKey, onOpen, info }: { list: Holding[]; finnhubKey: string; onOpen: (symbol: string) => void; info: boolean }) {
   const [acct, setAcct] = useState<Account>(loadPaper);
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
@@ -101,7 +104,7 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
         {b.rows.length > 0 && <button onClick={refresh}>{loading ? 'Loading' : 'Refresh prices'}</button>}
       </div>
       {b.rows.length === 0 ? (
-        <p className="note">No positions yet. Place a paper order below; it fills at the latest quote using pretend money. Selling something you do not hold opens a short.</p>
+        <p className="note">No positions yet.{info ? ' Place a paper order below; it fills at the latest quote using pretend money. Selling something you do not hold opens a short.' : ''}</p>
       ) : (
         <>
           <div className="alloc" role="img" aria-label={`Long ${ofEquity(b.longExp)} of account value, short ${ofEquity(b.shortExp)}`}>
@@ -165,7 +168,7 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
       >
         {confirmReset ? 'Tap again to erase all paper positions and trades' : `Reset paper account to $${START_CASH.toLocaleString('en-US')}`}
       </button>
-      <p className="fine pad">Paper trading uses pretend money, filled instantly at the last quote, which can be delayed, with no fees, borrow costs or dividends. Margin is simplified: long stock is paid in full, a short needs 50% of its value, and futures need 10% of contract value. Real brokers set different margins per contract and will close positions that run out of margin; this account does not. Not investment advice.</p>
+      {info && <p className="fine pad">Paper trading uses pretend money, filled instantly at the last quote, which can be delayed, with no fees, borrow costs or dividends. Margin is simplified: long stock is paid in full, a short needs 50% of its value, and futures need 10% of contract value. Real brokers set different margins per contract and will close positions that run out of margin; this account does not. Not investment advice.</p>}
     </>
   );
 }

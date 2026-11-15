@@ -34,7 +34,7 @@ function useCloses(symbols: string[], nonce: number) {
     // Refetch only when Refresh was pressed, not when switching views afterwards.
     const force = nonce !== handledNonce;
     handledNonce = nonce;
-    setState({ data: {}, done: 0, failed: 0, loading: true });
+    setState({ data: {}, done: 0, failed: 0, loading: symbols.length > 0 });
     (async () => {
       for (let i = 0; i < symbols.length; i++) {
         const cached = cache.get(symbols[i]);

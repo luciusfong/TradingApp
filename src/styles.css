@@ -201,6 +201,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .modes button { padding-inline: 8px; }
 .modes .info { margin-left: auto; padding-inline: 4px; }
 .modes .info[aria-pressed='true'] { background: none; color: var(--accent); }
+.settings .toggle + .toggle { margin-top: 0; }
 
 /* News categories */
 .cats { display: flex; gap: 6px; padding: 12px 14px 4px; overflow-x: auto; scrollbar-width: none; }

@@ -23,16 +23,10 @@ export const LARGE_CAPS = 'AAPL MSFT NVDA AMZN GOOGL META TSLA AVGO BRK-B JPM LL
 export const isFuture = (symbol: string) => !!CATALOG[symbol] || /=F$|=X$|\.NYB$|^\^/.test(symbol);
 export const labelOf = (h: Holding) => h.label ?? h.symbol;
 export const holdingFor = (symbol: string): Holding => CATALOG[symbol] ?? { symbol };
-export interface Settings { finnhubKey: string; hideLowValue: boolean; screenerInfo: boolean }
+export interface Settings { finnhubKey: string; hideLowValue: boolean; showInfo: boolean } // showInfo: explanations of the screens and financial terms
 
-const DEFAULT_LIST: Holding[] = [
-  { symbol: 'AAPL', name: 'Apple' },
-  { symbol: 'MSFT', name: 'Microsoft' },
-  { symbol: 'NVDA', name: 'Nvidia' },
-  { symbol: 'TSLA', name: 'Tesla' },
-  { symbol: 'SPY', name: 'S&P 500 ETF' },
-];
-const ADDED_V2 = ['CL=F', 'NQ=F', 'UB=F', 'GC=F', 'DX-Y.NYB'];
+// The watchlist starts empty. Earlier versions pre-filled it with these.
+const OLD_DEFAULTS = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'CL=F', 'NQ=F', 'UB=F', 'GC=F', 'DX-Y.NYB'];
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -47,17 +41,17 @@ function write(key: string, value: unknown) {
 }
 
 export function loadWatchlist(): Holding[] {
-  let list = read<Holding[]>('ta.watchlist', DEFAULT_LIST);
-  // One-time: add the futures and dollar index to lists saved by the first version.
-  if (!read<boolean>('ta.v2', false)) {
-    list = [...list, ...ADDED_V2.filter((s) => !list.some((h) => h.symbol === s)).map((s) => CATALOG[s])];
-    write('ta.watchlist', list);
-    write('ta.v2', true);
+  let list = read<Holding[]>('ta.watchlist', []);
+  // One-time: clear a list that is still exactly the old pre-filled one. A list the user has edited is kept.
+  if (!read<boolean>('ta.v3', false)) {
+    const untouched = list.length > 0 && list.every((h) => OLD_DEFAULTS.includes(h.symbol)) && (list.length === 5 || list.length === OLD_DEFAULTS.length);
+    if (untouched) { list = []; write('ta.watchlist', list); }
+    write('ta.v3', true);
   }
   return list;
 }
 export const saveWatchlist = (w: Holding[]) => write('ta.watchlist', w);
-export const loadSettings = () => ({ finnhubKey: '', hideLowValue: true, screenerInfo: true, ...read<Partial<Settings>>('ta.settings', {}) });
+export const loadSettings = () => ({ finnhubKey: '', hideLowValue: true, showInfo: false, ...read<Partial<Settings>>('ta.settings', {}) });
 export const saveSettings = (s: Settings) => write('ta.settings', s);
 
 export function cleanSymbol(input: string): string {

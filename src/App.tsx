@@ -4,7 +4,7 @@ import { Screener } from './Screener';
 import { Trading } from './Trading';
 import { errorText } from './lib/http';
 import { getQuote, getSeries, lookupName, type Quote, type Range, type Series } from './lib/market';
-import { CATEGORY_NAME, GROUPS, groupOf, marketNews, tickerNews, type Category, type Group, type NewsItem } from './lib/news';
+import { CATEGORY_NAME, GROUPS, groupOf, MARKET_DAYS, marketNews, tickerNews, type Category, type Group, type NewsItem } from './lib/news';
 import { aggregate, type Label } from './lib/sentiment';
 import { syncWidgetPaper, syncWidgetWatchlist } from './lib/widget';
 import { cleanSymbol, holdingFor, labelOf, loadPaper, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
@@ -201,6 +201,7 @@ export default function App() {
     setList(next); saveWatchlist(next);
   };
   const updateSettings = (s: Settings) => { setSettings(s); saveSettings(s); };
+  const toggleInfo = () => updateSettings({ ...settings, showInfo: !settings.showInfo });
 
   if (detail && holding) {
     return (
@@ -277,7 +278,7 @@ export default function App() {
             )}
             {list.length === 0 && <p className="note">Your watchlist is empty. Add a ticker below.</p>}
             <AddForm onAdd={addSymbol} />
-            <p className="note">Bars show each recent headline, oldest to newest. Blue is positive, orange is negative, grey is neutral.</p>
+            {settings.showInfo && list.length > 0 && <p className="note">Bars show each recent headline, oldest to newest. Blue is positive, orange is negative, grey is neutral.</p>}
           </>
         )}
         {tab === 'news' && (
@@ -286,14 +287,14 @@ export default function App() {
             {market.loading && !market.data && <p className="note spin">Reading headlines</p>}
             {market.data && (
               <>
-                <MoodCard items={market.data} hideLow={settings.hideLowValue} title="Market mood, last 24 hours" />
+                <MoodCard items={market.data} hideLow={settings.hideLowValue} title={`Market mood, last ${MARKET_DAYS} days`} />
                 <NewsList items={market.data} hideLow={settings.hideLowValue} />
               </>
             )}
           </>
         )}
-        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} info={settings.screenerInfo} onToggleInfo={() => updateSettings({ ...settings, screenerInfo: !settings.screenerInfo })} />}
-        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} />}
+        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} info={settings.showInfo} onToggleInfo={toggleInfo} />}
+        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} info={settings.showInfo} onToggleInfo={toggleInfo} />}
         {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} />}
       </main>
       <nav className="tabs" aria-label="Sections">
@@ -432,6 +433,13 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (s
           <p className="help">Stock-pick lists, "should you buy" pieces and after-the-fact explainers. They are also left out of the mood score.</p>
         </span>
         <input type="checkbox" checked={settings.hideLowValue} onChange={(e) => onChange({ ...settings, hideLowValue: e.target.checked })} />
+      </label>
+      <label className="toggle">
+        <span>
+          <b>Show explanations</b>
+          <p className="help">Descriptions of each screen and the financial terms it uses. Also switched by the Info button on the Screener and Trading tabs.</p>
+        </span>
+        <input type="checkbox" checked={settings.showInfo} onChange={(e) => onChange({ ...settings, showInfo: e.target.checked })} />
       </label>
       <p className="fine">
         Sentiment is scored on this phone by matching finance words and phrases in each headline. It reads wording, not meaning, so

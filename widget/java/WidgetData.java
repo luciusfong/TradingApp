@@ -199,10 +199,11 @@ final class WidgetData {
     }
 
     private static JSONArray news() throws Exception {
-        String url = "https://news.google.com/rss/search?q=" + URLEncoder.encode("stock market when:1d", "UTF-8") + "&hl=en-US&gl=US&ceid=US:en";
+        String url = "https://news.google.com/rss/search?q=" + URLEncoder.encode("stock market when:3d", "UTF-8") + "&hl=en-US&gl=US&ceid=US:en";
         String xml = get(url);
         SimpleDateFormat fmt = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US);
         List<JSONObject> items = new ArrayList<>();
+        long cutoff = System.currentTimeMillis() - 3L * 24 * 60 * 60 * 1000;
         Matcher m = ITEM.matcher(xml);
         while (m.find() && items.size() < 60) {
             String block = m.group(1);
@@ -220,6 +221,7 @@ final class WidgetData {
             } catch (Exception e) {
                 at = System.currentTimeMillis();
             }
+            if (at < cutoff) continue; // the feed's own date filter lets old stories through
             JSONObject o = new JSONObject();
             o.put("t", title);
             o.put("s", source);

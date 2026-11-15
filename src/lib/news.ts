@@ -206,19 +206,24 @@ export async function tickerNews(symbol: string, name: string | undefined, finnh
   return enrich(raw.filter((r) => r.time >= cutoff));
 }
 
+// Market news window: long enough that Friday's close is still there on a Sunday, short enough to stay current.
+export const MARKET_DAYS = 3;
+
 export async function marketNews(): Promise<NewsItem[]> {
   const res = await Promise.allSettled([
-    fetchRss('stock market when:1d'),
-    fetchRss('Federal Reserve OR inflation OR tariffs OR earnings when:1d'),
-    fetchRss('site:reuters.com/markets OR site:reuters.com/business when:1d'),
-    fetchRss('"SEC filing" OR "8-K" OR "10-Q" OR "13F" OR "files for IPO" when:1d'),
-    fetchRss('"FDA approval" OR "FDA approves" OR "FDA rejects" OR PDUFA when:1d'),
-    fetchRss('"insider buying" OR "insider selling" OR "Form 4" OR "hedge fund" stake when:1d'),
-    fetchRss('merger OR acquisition OR buyout OR "share buyback" when:1d'),
-    fetchRss('geopolitical OR sanctions OR tariffs markets when:1d'),
-    fetchRss('AI OR semiconductor OR "big tech" stocks when:1d'),
+    fetchRss(`stock market when:${MARKET_DAYS}d`),
+    fetchRss(`Federal Reserve OR inflation OR tariffs OR earnings when:${MARKET_DAYS}d`),
+    fetchRss(`site:reuters.com/markets OR site:reuters.com/business when:${MARKET_DAYS}d`),
+    fetchRss(`"SEC filing" OR "8-K" OR "10-Q" OR "13F" OR "files for IPO" when:${MARKET_DAYS}d`),
+    fetchRss(`"FDA approval" OR "FDA approves" OR "FDA rejects" OR PDUFA when:${MARKET_DAYS}d`),
+    fetchRss(`"insider buying" OR "insider selling" OR "Form 4" OR "hedge fund" stake when:${MARKET_DAYS}d`),
+    fetchRss(`merger OR acquisition OR buyout OR "share buyback" when:${MARKET_DAYS}d`),
+    fetchRss(`geopolitical OR sanctions OR tariffs markets when:${MARKET_DAYS}d`),
+    fetchRss(`AI OR semiconductor OR "big tech" stocks when:${MARKET_DAYS}d`),
   ]);
   const raw = res.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
   if (!raw.length && res.every((r) => r.status === 'rejected')) throw (res[0] as PromiseRejectedResult).reason;
-  return enrich(raw);
+  // Google's when: filter is loose with OR searches and lets months-old stories through, so enforce the window here.
+  const cutoff = Date.now() - MARKET_DAYS * 864e5;
+  return enrich(raw.filter((r) => r.time >= cutoff));
 }

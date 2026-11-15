@@ -2,7 +2,8 @@
 
 US market data and news sentiment for Android. Part one of three (news + market data; algorithm; paper/live trading).
 
-- **Watchlist** with quotes, daily change and a sentiment tape (one bar per recent headline).
+- Explanations of the screens and financial terms are hidden by default; the Info button (Screener, Trading) or Settings turns them on.
+- **Watchlist** (starts empty) with quotes, daily change and a sentiment tape (one bar per recent headline).
 - **Ticker page** with price chart (1D to 1Y) and scored, de-duplicated headlines.
 - **Screener, Technical view:** Minervini trend template for stocks, Turtle-style 55/20-day breakout rule for futures.
 - **Screener, Fundamental view:** Lynch PEG plus Buffett-style quality checks, from Finnhub basic financials (needs the free key). Logic in `src/lib/fundamentals.ts`.
