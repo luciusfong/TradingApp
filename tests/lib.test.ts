@@ -282,3 +282,68 @@ describe('fundamentals', () => {
     expect(isFuture('BRK-B')).toBe(false);
   });
 });
+
+import { categoryOf, groupOf, GROUPS } from '../src/lib/news';
+import { applyOrder, breakdown, newAccount } from '../src/lib/paper';
+
+describe('news categories', () => {
+  it('sorts headlines into categories', () => {
+    expect(categoryOf('Nvidia CEO sells $40 million in shares, Form 4 shows')).toBe('insider');
+    expect(categoryOf('Berkshire trims Apple stake in latest 13F')).toBe('institutional');
+    expect(categoryOf('Acme files 8-K disclosing new credit facility')).toBe('sec');
+    expect(categoryOf('FDA approves new obesity drug from Lilly')).toBe('fda');
+    expect(categoryOf('Microsoft to acquire gaming studio')).toBe('ma');
+    expect(categoryOf('Apple announces $90 billion share buyback')).toBe('corpfund');
+    expect(categoryOf('Oil jumps as new sanctions hit Russia')).toBe('geopolitical');
+    expect(categoryOf('Fed holds interest rates steady')).toBe('economics');
+    expect(categoryOf('AI chip demand lifts semiconductor makers')).toBe('tech');
+    expect(categoryOf('Wall Street closes higher as bank earnings beat')).toBe('financial');
+    expect(categoryOf('Sunny weather expected')).toBe('other');
+    expect(categoryOf('Quarterly update', 'SEC.gov')).toBe('sec');
+  });
+  it('rolls categories up into major groups', () => {
+    expect(groupOf('insider')).toBe('filings');
+    expect(groupOf('fda')).toBe('filings');
+    expect(groupOf('geopolitical')).toBe('news');
+    expect(groupOf('ma')).toBe('corporate');
+    expect(GROUPS.flatMap((g) => g.cats).length).toBe(11);
+    expect(enrich(parseRss(RSS)).every((n) => !!n.category)).toBe(true);
+  });
+});
+
+describe('paper account', () => {
+  it('buys, averages cost and sells with realised profit', () => {
+    let a = newAccount();
+    a = applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 10, price: 100 });
+    a = applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 10, price: 120 });
+    expect(a.positions.AAPL).toEqual({ qty: 20, avgCost: 110 });
+    expect(a.cash).toBe(97800);
+    a = applyOrder(a, { symbol: 'AAPL', side: 'sell', qty: 5, price: 130 });
+    expect(a.realized).toBe(100);
+    expect(a.positions.AAPL.qty).toBe(15);
+    expect(a.cash).toBe(98450);
+    a = applyOrder(a, { symbol: 'AAPL', side: 'sell', qty: 15, price: 110 });
+    expect(a.positions.AAPL).toBeUndefined();
+    expect(a.trades.length).toBe(4);
+  });
+  it('rejects orders it cannot fill', () => {
+    const a = newAccount();
+    expect(() => applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 1000, price: 200 })).toThrow(/Not enough cash/);
+    expect(() => applyOrder(a, { symbol: 'AAPL', side: 'sell', qty: 1, price: 200 })).toThrow(/Short selling/);
+    expect(() => applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 1.5, price: 200 })).toThrow(/whole number/);
+  });
+  it('breaks positions down by value, profit and weight', () => {
+    let a = newAccount();
+    a = applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 100, price: 100 });
+    a = applyOrder(a, { symbol: 'MSFT', side: 'buy', qty: 50, price: 400 });
+    const b = breakdown(a, { AAPL: 110 });
+    expect(b.equity).toBe(101000);
+    expect(b.rows[0].symbol).toBe('MSFT');
+    expect(b.rows[0].priced).toBe(false);
+    expect(b.rows[1].pnl).toBe(1000);
+    expect(b.rows[1].pnlPct).toBeCloseTo(10);
+    expect(b.rows[1].weight).toBeCloseTo(10.89, 1);
+    expect(b.total).toBe(1000);
+    expect(b.cashWeight + b.rows[0].weight + b.rows[1].weight).toBeCloseTo(100);
+  });
+});

@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chart } from './Chart';
 import { Screener } from './Screener';
+import { Trading } from './Trading';
 import { errorText } from './lib/http';
 import { getQuote, getSeries, lookupName, type Quote, type Range, type Series } from './lib/market';
-import { marketNews, tickerNews, type NewsItem } from './lib/news';
+import { CATEGORY_NAME, GROUPS, groupOf, marketNews, tickerNews, type Category, type Group, type NewsItem } from './lib/news';
 import { aggregate, type Label } from './lib/sentiment';
 import { cleanSymbol, holdingFor, labelOf, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
 
-type Tab = 'watchlist' | 'screener' | 'news' | 'settings';
-const TAB_NAME: Record<Tab, string> = { watchlist: 'Watchlist', screener: 'Screener', news: 'Market news', settings: 'Settings' };
+type Tab = 'watchlist' | 'screener' | 'news' | 'trading' | 'settings';
+const TABS: Tab[] = ['watchlist', 'screener', 'news', 'trading', 'settings'];
+const TAB_NAME: Record<Tab, string> = { watchlist: 'Watchlist', screener: 'Screener', news: 'Market news', trading: 'Trading', settings: 'Settings' };
 type Load<T> = { data?: T; error?: string; loading: boolean; at?: number };
 
 const money = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -55,10 +57,33 @@ function Tape({ items, max = 24 }: { items: NewsItem[]; max?: number }) {
   );
 }
 
+// Headlines filtered by major group (Filings, News, Corporate, Other), then by category within it.
 function NewsList({ items, hideLow }: { items: NewsItem[]; hideLow: boolean }) {
-  const shown = hideLow ? items.filter((n) => !n.lowValue) : items;
-  if (!shown.length) return <p className="note">No headlines in the last few days.</p>;
+  const [group, setGroup] = useState<Group | 'all'>('all');
+  const [cat, setCat] = useState<Category | null>(null);
+  const all = hideLow ? items.filter((n) => !n.lowValue) : items;
+  if (!all.length) return <p className="note">No headlines in the last few days.</p>;
+  const count = (c: Category) => all.filter((n) => n.category === c).length;
+  const active = GROUPS.find((g) => g.id === group);
+  const shown = all.filter((n) => (group === 'all' || groupOf(n.category) === group) && (!cat || n.category === cat));
   return (
+    <>
+    <div className="cats" role="group" aria-label="News group">
+      <button aria-pressed={group === 'all'} onClick={() => { setGroup('all'); setCat(null); }}>All <span className="num">{all.length}</span></button>
+      {GROUPS.map((g) => (
+        <button key={g.id} aria-pressed={group === g.id} onClick={() => { setGroup(g.id); setCat(null); }}>
+          {g.name} <span className="num">{g.cats.reduce((s, c) => s + count(c), 0)}</span>
+        </button>
+      ))}
+    </div>
+    {active && active.cats.length > 1 && (
+      <div className="cats sub" role="group" aria-label={`${active.name} category`}>
+        {active.cats.map((c) => (
+          <button key={c} aria-pressed={cat === c} onClick={() => setCat(cat === c ? null : c)}>{CATEGORY_NAME[c]} <span className="num">{count(c)}</span></button>
+        ))}
+      </div>
+    )}
+    {!shown.length && <p className="note">No headlines in this category right now.</p>}
     <ul className="news">
       {shown.slice(0, 60).map((n) => {
         const l = n.sentiment.label;
@@ -74,7 +99,8 @@ function NewsList({ items, hideLow }: { items: NewsItem[]; hideLow: boolean }) {
                   </span>
                   <b>{n.source}</b>
                   <span>{ago(n.time)}</span>
-                  {n.event && <span className="chip">{n.event}</span>}
+                  <span className="chip cat">{CATEGORY_NAME[n.category]}</span>
+                  {n.event && n.event !== CATEGORY_NAME[n.category] && <span className="chip">{n.event}</span>}
                   {n.similar > 0 && <span>+{n.similar} similar</span>}
                   {n.lowValue && <span>Low value</span>}
                 </span>
@@ -84,6 +110,7 @@ function NewsList({ items, hideLow }: { items: NewsItem[]; hideLow: boolean }) {
         );
       })}
     </ul>
+    </>
   );
 }
 
@@ -261,11 +288,12 @@ export default function App() {
             )}
           </>
         )}
-        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} />}
+        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} info={settings.screenerInfo} onToggleInfo={() => updateSettings({ ...settings, screenerInfo: !settings.screenerInfo })} />}
+        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} />}
         {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} />}
       </main>
       <nav className="tabs" aria-label="Sections">
-        {(['watchlist', 'screener', 'news', 'settings'] as Tab[]).map((t) => (
+        {TABS.map((t) => (
           <button key={t} aria-current={tab === t ? 'page' : undefined} onClick={() => { setTab(t); setEditing(false); }}>
             {t === 'news' ? 'News' : TAB_NAME[t]}
           </button>

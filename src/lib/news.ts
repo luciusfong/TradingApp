@@ -11,6 +11,7 @@ export interface NewsItem {
   sentiment: Sentiment;
   weight: number; // source weight 0.3..1.5
   event: string | null;
+  category: Category;
   lowValue: boolean;
   similar: number; // other outlets carrying the same story
 }
@@ -86,6 +87,41 @@ export function eventOf(text: string): string | null {
   return null;
 }
 
+export type Category = 'sec' | 'fda' | 'insider' | 'institutional' | 'geopolitical' | 'tech' | 'financial' | 'economics' | 'ma' | 'corpfund' | 'other';
+export type Group = 'filings' | 'news' | 'corporate' | 'other';
+export const CATEGORY_NAME: Record<Category, string> = {
+  sec: 'SEC filings', fda: 'FDA approvals', insider: 'Insider', institutional: 'Institutional',
+  geopolitical: 'Geopolitical', tech: 'Tech', financial: 'Financial', economics: 'Economics',
+  ma: 'M&A', corpfund: 'Corporate funds', other: 'Other',
+};
+export const GROUPS: { id: Group; name: string; cats: Category[] }[] = [
+  { id: 'filings', name: 'Filings', cats: ['sec', 'fda', 'insider', 'institutional'] },
+  { id: 'news', name: 'News', cats: ['geopolitical', 'tech', 'financial', 'economics'] },
+  { id: 'corporate', name: 'Corporate', cats: ['ma', 'corpfund'] },
+  { id: 'other', name: 'Other', cats: ['other'] },
+];
+export const groupOf = (c: Category): Group => GROUPS.find((g) => g.cats.includes(c))!.id;
+
+// First match wins, so the narrow disclosure types sit above the broad topics.
+const CATEGORIES: [Category, RegExp][] = [
+  ['insider', /\binsider (buy|sell|sale|trad|purchas|transaction)|\bform 4\b|10b5-1|\b(ceo|cfo|coo|cto|director|chairman|president|executive|officer|founder)s? (sells?|sold|buys?|bought|dumps?|unloads?|offloads?|purchases?|acquires?) .{0,40}\b(shares|stock)\b/i],
+  ['institutional', /\b13[fdg]\b|\bhedge funds?\b|\binstitutional (investors?|holders?|ownership|buying|selling)|\b(berkshire|blackrock|vanguard|state street|bridgewater|citadel|renaissance technologies|pershing square|ark invest|tiger global|norges bank|elliott management|soros)\b|\b(raises|boosts|trims|cuts|increases|reduces|takes|discloses|builds|exits|sells|dumps|adds to) .{0,30}\b(stake|position|holdings?)\b|\bactivist investor|\bpension funds?\b|\bsovereign wealth/i],
+  ['sec', /\bsec filings?\b|\b(8-k|10-k|10-q|s-1|s-3|424b\d?|def ?14a|20-f|6-k)\b|\bform (8|10|s|20)-|\bfiles? (with the sec|for (an )?ipo|for bankruptcy|for chapter|a prospectus|registration)|\bfiled with the sec|\bproxy (statement|filing)|\bannual report\b|\b(regulatory|securities) filings?\b|\bshelf (offering|registration)|sec\.gov/i],
+  ['fda', /\bfda\b|\bpdufa\b|\bclinical (trial|hold)|\bphase (1|2|3|i|ii|iii)\b|\bdrug approval|\b(nda|bla|snda)\b|510\(k\)|\bbreakthrough therapy|\bfast[- ]track designation|\borphan drug/i],
+  ['ma', /\b(acquires?|acquired|acquiring|acquisition|merger|merges?|merged|takeover|buyout|spin[- ]?off|divest\w*|tender offer)\b|\bdeal to (buy|acquire)\b|\b(to|will) (buy|acquire) .{1,50} (for|in) \$/i],
+  ['corpfund', /\b(buybacks?|repurchases?|repurchase program|dividends?|corporate venture|venture arm|capital (return|allocation)|capex|capital expenditures?|bitcoin treasury|treasury strategy|bond (sale|offering)|debt offering|share (sale|offering)|secondary offering)\b|\b(invests?|investing|to invest|commits?|pledges?) \$[\d.,]+ ?(billion|million|bn|mn|b|m)\b/i],
+  ['geopolitical', /\bgeopolit|\b(war|wars|sanctions?|tariffs?|military|missiles?|invasion|ceasefire|nato|opec\+?|embargo|airstrikes?|coup|summit)\b|\btrade (war|deal|talks|truce|tensions)|\bexport (controls?|bans?|curbs)|\b(china|chinese|russia|russian|ukraine|iran|israel|taiwan|north korea|middle east|gaza|venezuela|beijing|kremlin|strait of hormuz|red sea)\b/i],
+  ['economics', /\b(fed|fomc|powell|inflation|cpi|ppi|pce|payrolls|unemployment|jobless|gdp|recession|ecb|boj|pmi|stagflation|economy|economic|economists?)\b|\bfederal reserve|\binterest rates?\b|\brate (cut|hike)s?\b|\bjobs report|\btreasury yields?|\bcentral banks?\b|\bbank of (england|japan|canada)|\bconsumer (spending|confidence|sentiment|prices)|\bretail sales|\bhousing starts/i],
+  ['tech', /\b(ai|chips?|chipmakers?|semiconductors?|software|cloud|cyberattack|cybersecurity|iphone|android|robotaxi|robots?|robotics|quantum|startups?|big tech|nvidia|apple|microsoft|google|alphabet|meta|amazon|tesla|openai|anthropic|amd|intel|tsmc|broadcom|oracle|palantir|netflix|samsung|qualcomm)\b|\bartificial intelligence|\bdata cent(er|re)s?\b|\btech (stocks?|giants?|sector|shares)/i],
+  ['financial', /\b(earnings|revenue|profits?|eps|guidance|outlook|stocks?|shares|wall street|s&p|dow|nasdaq|markets?|bonds?|yields?|banks?|upgrades?|downgrades?|price target|ipo|investors?|rally|rallies|sell-?off|bitcoin|crypto|oil|crude|gold|dollar|futures|quarterly results)\b/i],
+];
+export function categoryOf(title: string, source = ''): Category {
+  if (/sec\.gov/i.test(source)) return 'sec';
+  if (/fda\.gov/i.test(source)) return 'fda';
+  for (const [c, re] of CATEGORIES) if (re.test(title)) return c;
+  return 'other';
+}
+
 // Listicles, stock-picking opinion and after-the-fact explainers.
 const LOW_VALUE = /(\b\d+\s+(best|top|stocks?|reasons?|things)\b|stocks? to (buy|sell|watch|avoid)|should you (buy|sell)|is it (too late|time) to|here'?s (why|what|how)|what to know|prediction:|could (make you|turn \$)|millionaire|better buy|why .{2,40} (stock|shares) (is|are|was|were) (up|down|rising|falling|jumping|soaring|sinking|plunging|moving|trading)|if you('d| had) invested|motley fool|buy the dip\?|my top|i'd buy)/i;
 export function isLowValue(title: string): boolean {
@@ -118,6 +154,7 @@ export function enrich(raw: RawItem[], threshold = 0.55): NewsItem[] {
       sentiment: scoreHeadline(r.title, r.summary),
       weight: sourceWeight(r.source),
       event: eventOf(r.title),
+      category: categoryOf(r.title, r.source),
       lowValue: isLowValue(r.title) || isLowValue(r.source),
       similar: 0,
     };
@@ -174,6 +211,12 @@ export async function marketNews(): Promise<NewsItem[]> {
     fetchRss('stock market when:1d'),
     fetchRss('Federal Reserve OR inflation OR tariffs OR earnings when:1d'),
     fetchRss('site:reuters.com/markets OR site:reuters.com/business when:1d'),
+    fetchRss('"SEC filing" OR "8-K" OR "10-Q" OR "13F" OR "files for IPO" when:1d'),
+    fetchRss('"FDA approval" OR "FDA approves" OR "FDA rejects" OR PDUFA when:1d'),
+    fetchRss('"insider buying" OR "insider selling" OR "Form 4" OR "hedge fund" stake when:1d'),
+    fetchRss('merger OR acquisition OR buyout OR "share buyback" when:1d'),
+    fetchRss('geopolitical OR sanctions OR tariffs markets when:1d'),
+    fetchRss('AI OR semiconductor OR "big tech" stocks when:1d'),
   ]);
   const raw = res.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
   if (!raw.length && res.every((r) => r.status === 'rejected')) throw (res[0] as PromiseRejectedResult).reason;

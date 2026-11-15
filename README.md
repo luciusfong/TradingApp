@@ -7,7 +7,8 @@ US market data and news sentiment for Android. Part one of three (news + market 
 - **Screener, Technical view:** Minervini trend template for stocks, Turtle-style 55/20-day breakout rule for futures.
 - **Screener, Fundamental view:** Lynch PEG plus Buffett-style quality checks, from Finnhub basic financials (needs the free key). Logic in `src/lib/fundamentals.ts`.
 - **Screener** with a macro view (liquidity read from bonds and the dollar, cross-asset trends) and a quant view (z-score, RSI(2), momentum signals) over the watchlist or 30 large caps. Logic in `src/lib/screen.ts`.
-- **Market news** with an overall mood score.
+- **Market news** with an overall mood score. Headlines are sorted into categories (`categoryOf` in `src/lib/news.ts`) and rolled up into Filings (SEC filings, FDA approvals, insider, institutional), News (geopolitical, tech, financial, economics), Corporate (M&A, corporate funds) and Other.
+- **Trading** tab with Paper and Live accounts. Paper is a $100,000 pretend account (whole shares, long only, fills at the latest quote) with a position breakdown; logic in `src/lib/paper.ts`. Live is a placeholder until a broker is connected.
 - Futures and the dollar index can be added by broker-style names: `CLmain`, `NQmain`, `UBmain`, `GCmain`, `ESmain`, `USDindex`.
 - **Sentiment** is scored on the phone with a finance word-and-phrase list (`src/lib/sentiment.ts`). No server.
 

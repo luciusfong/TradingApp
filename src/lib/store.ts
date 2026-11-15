@@ -1,3 +1,4 @@
+import { newAccount, type Account } from './paper';
 export interface Holding { symbol: string; name?: string; label?: string; q?: string }
 
 // Futures and indexes: the data symbol, the label shown in the app, and the
@@ -22,7 +23,7 @@ export const LARGE_CAPS = 'AAPL MSFT NVDA AMZN GOOGL META TSLA AVGO BRK-B JPM LL
 export const isFuture = (symbol: string) => !!CATALOG[symbol] || /=F$|=X$|\.NYB$|^\^/.test(symbol);
 export const labelOf = (h: Holding) => h.label ?? h.symbol;
 export const holdingFor = (symbol: string): Holding => CATALOG[symbol] ?? { symbol };
-export interface Settings { finnhubKey: string; hideLowValue: boolean }
+export interface Settings { finnhubKey: string; hideLowValue: boolean; screenerInfo: boolean }
 
 const DEFAULT_LIST: Holding[] = [
   { symbol: 'AAPL', name: 'Apple' },
@@ -56,10 +57,13 @@ export function loadWatchlist(): Holding[] {
   return list;
 }
 export const saveWatchlist = (w: Holding[]) => write('ta.watchlist', w);
-export const loadSettings = () => ({ finnhubKey: '', hideLowValue: true, ...read<Partial<Settings>>('ta.settings', {}) });
+export const loadSettings = () => ({ finnhubKey: '', hideLowValue: true, screenerInfo: true, ...read<Partial<Settings>>('ta.settings', {}) });
 export const saveSettings = (s: Settings) => write('ta.settings', s);
 
 export function cleanSymbol(input: string): string {
   const s = input.trim().toUpperCase().replace(/[^A-Z0-9.\-^=]/g, '').slice(0, 12);
   return ALIAS[s] ?? s;
 }
+
+export const loadPaper = (): Account => ({ ...newAccount(), ...read<Partial<Account>>('ta.paper', {}) });
+export const savePaper = (a: Account) => write('ta.paper', a);

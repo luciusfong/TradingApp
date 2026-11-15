@@ -81,7 +81,9 @@ function Spark({ data, label }: { data: number[]; label: string }) {
   );
 }
 
-export function Screener({ list, onOpen, finnhubKey, onSettings }: { list: Holding[]; onOpen: (symbol: string) => void; finnhubKey: string; onSettings: () => void }) {
+export function Screener({ list, onOpen, finnhubKey, onSettings, info, onToggleInfo }: {
+  list: Holding[]; onOpen: (symbol: string) => void; finnhubKey: string; onSettings: () => void; info: boolean; onToggleInfo: () => void;
+}) {
   const [mode, setMode] = useState<Mode>('macro');
   const [universe, setUniverse] = useState<Universe>('watchlist');
   const [nonce, setNonce] = useState(0);
@@ -112,6 +114,7 @@ export function Screener({ list, onOpen, finnhubKey, onSettings }: { list: Holdi
         {(Object.keys(MODE_NAME) as Mode[]).map((m) => (
           <button key={m} aria-pressed={mode === m} onClick={() => setMode(m)}>{MODE_NAME[m]}</button>
         ))}
+        <button className="info" aria-pressed={info} aria-label={info ? 'Hide descriptions' : 'Show descriptions'} onClick={onToggleInfo}>Info</button>
       </div>
       {mode !== 'funda' && (
         <div className="refresh">
@@ -120,15 +123,15 @@ export function Screener({ list, onOpen, finnhubKey, onSettings }: { list: Holdi
       )}
       {mode !== 'funda' && st.error && <div className="err">{st.error}</div>}
       {mode !== 'funda' && !st.error && st.failed > 0 && !st.loading && <p className="note">{st.failed} of {symbols.length} symbols could not be loaded.</p>}
-      {mode === 'macro' && <Macro data={st.data} onOpen={onOpen} loading={st.loading} />}
-      {mode === 'quant' && <Quant data={st.data} symbols={symbols} name={name} onOpen={onOpen} pick={pick} loading={st.loading} />}
-      {mode === 'tech' && <Technical data={st.data} stocks={stocks} futures={futures} name={name} onOpen={onOpen} pick={pick} loading={st.loading} />}
-      {mode === 'funda' && <Fundamental stocks={stocks} name={name} onOpen={onOpen} pick={pick} finnhubKey={finnhubKey} onSettings={onSettings} />}
+      {mode === 'macro' && <Macro data={st.data} onOpen={onOpen} loading={st.loading} info={info} />}
+      {mode === 'quant' && <Quant data={st.data} symbols={symbols} name={name} onOpen={onOpen} pick={pick} loading={st.loading} info={info} />}
+      {mode === 'tech' && <Technical data={st.data} stocks={stocks} futures={futures} name={name} onOpen={onOpen} pick={pick} loading={st.loading} info={info} />}
+      {mode === 'funda' && <Fundamental stocks={stocks} name={name} onOpen={onOpen} pick={pick} finnhubKey={finnhubKey} onSettings={onSettings} info={info} />}
     </>
   );
 }
 
-function Macro({ data, onOpen, loading }: { data: Record<string, number[]>; onOpen: (s: string) => void; loading: boolean }) {
+function Macro({ data, onOpen, loading, info }: { data: Record<string, number[]>; onOpen: (s: string) => void; loading: boolean; info: boolean }) {
   const rows = useMemo(() => {
     const r: Record<string, MacroRow> = {};
     for (const s of MACRO_SET) if (data[s]?.length > 60) r[s] = macroRow(s, data[s]);
@@ -139,7 +142,7 @@ function Macro({ data, onOpen, loading }: { data: Record<string, number[]>; onOp
 
   return (
     <>
-      <p className="note">Top-down view in the style of Stanley Druckenmiller: read liquidity from bonds and the dollar first, then follow the strongest trends that agree with it.</p>
+      {info && <p className="note">Top-down view in the style of Stanley Druckenmiller: read liquidity from bonds and the dollar first, then follow the strongest trends that agree with it.</p>}
       {reads.length > 0 && (
         <ul className="reads">
           {reads.map((r) => (
@@ -176,14 +179,14 @@ function Macro({ data, onOpen, loading }: { data: Record<string, number[]>; onOp
           Clearest trends now: {aligned.slice(0, 4).map((r) => `${labelOf(CATALOG[r.symbol])} ${r.trend === 'up' ? 'up' : 'down'} ${pct(r.r3m)} in 3 months`).join('; ')}.
         </p>
       )}
-      <p className="fine pad">Uptrend means price is above its 50-day average and the 50-day is above the 200-day. Downtrend is the reverse. This is a rules-based summary of price trends, not investment advice.</p>
+      {info && <p className="fine pad">Uptrend means price is above its 50-day average and the 50-day is above the 200-day. Downtrend is the reverse. This is a rules-based summary of price trends, not investment advice.</p>}
     </>
   );
 }
 
 function Quant(p: {
   data: Record<string, number[]>; symbols: string[]; name: (s: string) => Holding; onOpen: (s: string) => void;
-  pick: React.ReactNode; loading: boolean;
+  pick: React.ReactNode; loading: boolean; info: boolean;
 }) {
   const rows = useMemo(() => {
     const out: QuantRow[] = [];
@@ -195,7 +198,7 @@ function Quant(p: {
 
   return (
     <>
-      <p className="note">Statistical screen in the spirit of Jim Simons: ignore the story, rank by numbers. Short-term stretch (z-score, RSI) checked against the long-term trend, plus 6-month momentum.</p>
+      {p.info && <p className="note">Statistical screen in the spirit of Jim Simons: ignore the story, rank by numbers. Short-term stretch (z-score, RSI) checked against the long-term trend, plus 6-month momentum.</p>}
       {p.pick}
       <div className="section-h"><h2>Signals</h2><span className="hint">{hits.length} of {rows.length}</span></div>
       {hits.length === 0 && <p className="note">{p.loading ? 'Scanning' : 'Nothing is statistically stretched right now. That is the normal state on most days.'}</p>}
@@ -230,10 +233,10 @@ function Quant(p: {
           </ul>
         </>
       )}
-      <p className="fine pad">
+      {p.info && <p className="fine pad">
         z-score is how many standard deviations the price sits from its 20-day average. RSI(2) below 5 or above 95 marks a short-term extreme.
         Renaissance's real models are secret and far more complex; this is a simple, transparent screen built on the same idea of trading statistics rather than opinions. Not investment advice.
-      </p>
+      </p>}
     </>
   );
 }
@@ -256,7 +259,7 @@ const px = (v: number) => {
 
 function Technical(p: {
   data: Record<string, number[]>; stocks: string[]; futures: string[]; name: (s: string) => Holding;
-  onOpen: (s: string) => void; pick: React.ReactNode; loading: boolean;
+  onOpen: (s: string) => void; pick: React.ReactNode; loading: boolean; info: boolean;
 }) {
   const template = useMemo(() => {
     const rows: TemplateRow[] = [];
@@ -273,7 +276,7 @@ function Technical(p: {
 
   return (
     <>
-      <p className="note">Two rule sets: Mark Minervini's trend template to find stocks in a confirmed uptrend, and a Turtle-style breakout rule (Richard Dennis) for futures.</p>
+      {p.info && <p className="note">Two rule sets: Mark Minervini's trend template to find stocks in a confirmed uptrend, and a Turtle-style breakout rule (Richard Dennis) for futures.</p>}
       {p.pick}
       <div className="section-h"><h2>Stocks: trend template</h2><span className="hint">{full} of {template.length} pass all {total}</span></div>
       {template.length === 0 && <p className="note">{p.loading ? 'Scanning' : p.stocks.length ? 'Needs about a year of price history per stock.' : 'No stocks on your watchlist. Switch to 30 large caps.'}</p>}
@@ -323,17 +326,17 @@ function Technical(p: {
         })}
       </ul>
       {trends.length === 0 && <p className="note">{p.loading ? 'Scanning' : 'No futures data.'}</p>}
-      <p className="fine pad">
+      {p.info && <p className="fine pad">
         The trend template is from Minervini's published criteria; relative strength here is ranked only within the list being screened.
         The futures rule uses closing prices and no position sizing, and simple breakout rules have earned far less since the 1990s than they did for the original Turtles. Neither is backtested in this app. Not investment advice.
-      </p>
+      </p>}
     </>
   );
 }
 
 function Fundamental(p: {
   stocks: string[]; name: (s: string) => Holding; onOpen: (s: string) => void; pick: React.ReactNode;
-  finnhubKey: string; onSettings: () => void;
+  finnhubKey: string; onSettings: () => void; info: boolean;
 }) {
   const [state, setState] = useState<{ rows: Fundamentals[]; done: number; failed: number; error?: string; loading: boolean }>({ rows: [], done: 0, failed: 0, loading: false });
   const [nonce, setNonce] = useState(0);
@@ -361,7 +364,7 @@ function Fundamental(p: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keyStr, p.finnhubKey, nonce]);
 
-  const intro = <p className="note">Peter Lynch's test (is the P/E justified by growth?) combined with Warren Buffett's (is it a high-quality business with little debt?).</p>;
+  const intro = p.info && <p className="note">Peter Lynch's test (is the P/E justified by growth?) combined with Warren Buffett's (is it a high-quality business with little debt?).</p>;
   if (!p.finnhubKey) {
     return (
       <>
@@ -412,10 +415,10 @@ function Fundamental(p: {
           );
         })}
       </ul>
-      <p className="fine pad">
+      {p.info && <p className="fine pad">
         PEG is the P/E divided by yearly earnings growth (5-year where available). Quality checks: return on equity 15% or more, net margin 10% or more,
         debt no more than equity, earnings growing. These ratios mislead for banks and insurers, where debt is the business, and for companies with large buybacks, which inflate return on equity. Not investment advice.
-      </p>
+      </p>}
     </>
   );
 }
