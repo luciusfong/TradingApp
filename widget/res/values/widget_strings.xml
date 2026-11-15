@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_watchlist_label">TradingApp Watchlist</string>
+    <string name="widget_positions_label">TradingApp Positions</string>
+    <string name="widget_news_label">TradingApp News</string>
+    <string name="widget_watchlist_desc">Prices and daily change for your watchlist</string>
+    <string name="widget_positions_desc">Paper account positions with value and profit or loss</string>
+    <string name="widget_news_desc">Latest market headlines</string>
+</resources>

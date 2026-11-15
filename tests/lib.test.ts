@@ -347,3 +347,16 @@ describe('paper account', () => {
     expect(b.cashWeight + b.rows[0].weight + b.rows[1].weight).toBeCloseTo(100);
   });
 });
+
+import { widgetPaper, widgetWatchlist } from '../src/lib/widget';
+
+describe('widget data', () => {
+  it('mirrors the watchlist and paper account for the home-screen widgets', () => {
+    expect(widgetWatchlist([{ symbol: 'AAPL', name: 'Apple' }, CATALOG['CL=F']])).toEqual([
+      { s: 'AAPL', l: 'AAPL', n: 'Apple' },
+      { s: 'CL=F', l: 'CLmain', n: 'Crude oil futures' },
+    ]);
+    const a = applyOrder(newAccount(), { symbol: 'AAPL', side: 'buy', qty: 10, price: 100 });
+    expect(widgetPaper(a)).toEqual({ cash: 99000, start: 100000, positions: [{ s: 'AAPL', l: 'AAPL', q: 10, c: 100 }] });
+  });
+});

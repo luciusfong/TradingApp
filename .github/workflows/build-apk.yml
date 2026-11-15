@@ -39,6 +39,7 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
+          node scripts/add-widgets.mjs
           sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/" android/app/build.gradle
           sed -i "s/versionName \"1.0\"/versionName \"0.1.${{ github.run_number }}\"/" android/app/build.gradle
           grep -n "version" android/app/build.gradle

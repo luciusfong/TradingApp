@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="w_sheet">#17212C</color>
+    <color name="w_ink">#E9EEF2</color>
+    <color name="w_ink2">#A9B5C0</color>
+    <color name="w_ink3">#7D8A96</color>
+    <color name="w_pos">#4A97D4</color>
+    <color name="w_neg">#CF7A42</color>
+</resources>

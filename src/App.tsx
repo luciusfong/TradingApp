@@ -6,7 +6,8 @@ import { errorText } from './lib/http';
 import { getQuote, getSeries, lookupName, type Quote, type Range, type Series } from './lib/market';
 import { CATEGORY_NAME, GROUPS, groupOf, marketNews, tickerNews, type Category, type Group, type NewsItem } from './lib/news';
 import { aggregate, type Label } from './lib/sentiment';
-import { cleanSymbol, holdingFor, labelOf, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
+import { syncWidgetPaper, syncWidgetWatchlist } from './lib/widget';
+import { cleanSymbol, holdingFor, labelOf, loadPaper, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
 
 type Tab = 'watchlist' | 'screener' | 'news' | 'trading' | 'settings';
 const TABS: Tab[] = ['watchlist', 'screener', 'news', 'trading', 'settings'];
@@ -154,6 +155,9 @@ export default function App() {
   }, []);
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
+  // Keep the home-screen widgets in step with the app.
+  useEffect(() => { syncWidgetWatchlist(list); }, [list]);
+  useEffect(() => { syncWidgetPaper(loadPaper()); }, []);
   useEffect(() => {
     const id = setInterval(() => { if (document.visibilityState === 'visible') refreshAll(); }, 90_000);
     return () => clearInterval(id);

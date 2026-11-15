@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { errorText } from './lib/http';
 import { getQuote } from './lib/market';
 import { applyOrder, breakdown, newAccount, START_CASH, type Account } from './lib/paper';
+import { syncWidgetPaper } from './lib/widget';
 import { cleanSymbol, holdingFor, isFuture, labelOf, loadPaper, savePaper, type Holding } from './lib/store';
 
 type Book = 'paper' | 'live';
@@ -34,7 +35,7 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
   const [confirmReset, setConfirmReset] = useState(false);
   const acctRef = useRef(acct);
   acctRef.current = acct;
-  const commit = (a: Account) => { acctRef.current = a; setAcct(a); savePaper(a); };
+  const commit = (a: Account) => { acctRef.current = a; setAcct(a); savePaper(a); syncWidgetPaper(a); };
 
   const held = Object.keys(acct.positions).join(',');
   const refresh = useCallback(async () => {
