@@ -35,6 +35,8 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
   const [confirmReset, setConfirmReset] = useState(false);
   const acctRef = useRef(acct);
   acctRef.current = acct;
+  const pricesRef = useRef(prices);
+  pricesRef.current = prices;
   const commit = (a: Account) => { acctRef.current = a; setAcct(a); savePaper(a); syncWidgetPaper(a); };
 
   const held = Object.keys(acct.positions).join(',');
@@ -56,14 +58,19 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
     const sym = cleanSymbol(symbol);
     const n = Number(qty);
     if (!sym) return setMsg({ ok: false, text: 'Type a ticker symbol, like AMD.' });
-    if (isFuture(sym)) return setMsg({ ok: false, text: 'Paper trading covers stocks and ETFs for now. Futures need margin and contract sizes, which are not modelled yet.' });
-    if (!Number.isInteger(n) || n <= 0) return setMsg({ ok: false, text: 'Quantity must be a whole number of shares, 1 or more.' });
+    const future = isFuture(sym);
+    const mult = holdingFor(sym).mult;
+    if (future && !mult) return setMsg({ ok: false, text: `${labelOf(holdingFor(sym))} cannot be paper traded: it is an index or a contract whose size this app does not know. Try CLmain, NQmain, ESmain, GCmain, HGmain, ZNmain or UBmain.` });
+    const unit = future ? (n === 1 ? 'contract' : 'contracts') : n === 1 ? 'share' : 'shares';
+    if (!Number.isInteger(n) || n <= 0) return setMsg({ ok: false, text: `Quantity must be a whole number of ${future ? 'contracts' : 'shares'}, 1 or more.` });
     setBusy(true);
     try {
       const q = await getQuote(sym, finnhubKey);
-      commit(applyOrder(acctRef.current, { symbol: sym, side, qty: n, price: q.price }));
+      const before = acctRef.current.positions[sym]?.qty ?? 0;
+      commit(applyOrder(acctRef.current, { symbol: sym, side, qty: n, price: q.price, mult, future }, pricesRef.current));
       setPrices((p) => ({ ...p, [sym]: q.price }));
-      setMsg({ ok: true, text: `${side === 'buy' ? 'Bought' : 'Sold'} ${n} ${sym} at ${money(q.price)}.` });
+      const verb = side === 'buy' ? (before < 0 ? 'Bought to cover' : 'Bought') : before <= 0 ? 'Sold short' : n > before ? 'Sold and went short' : 'Sold';
+      setMsg({ ok: true, text: `${verb} ${n} ${labelOf(holdingFor(sym))} ${unit} at ${money(q.price)}.` });
       setQty('');
     } catch (e) {
       setMsg({ ok: false, text: errorText(e) });
@@ -74,6 +81,7 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
   const b = breakdown(acct, prices);
   const name = (s: string) => list.find((h) => h.symbol === s) ?? holdingFor(s);
   const unpriced = b.rows.filter((r) => !r.priced).length;
+  const ofEquity = (v: number) => (b.equity > 0 ? `${((v / b.equity) * 100).toFixed(0)}%` : '—');
   return (
     <>
       <section className="acct">
@@ -82,7 +90,7 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
         <div className={`chg num ${tone(b.total)}`}>{signed(b.total)} ({signed(b.totalPct)}%) since start</div>
         <dl className="kv num">
           <div><dt>Cash</dt><dd>${money(b.cash)}</dd></div>
-          <div><dt>Invested</dt><dd>${money(b.invested)}</dd></div>
+          <div><dt>Buying power</dt><dd>${money(Math.max(0, b.buyingPower))}</dd></div>
           <div><dt>Open P/L</dt><dd className={tone(b.unrealized)}>{signed(b.unrealized)}</dd></div>
           <div><dt>Closed P/L</dt><dd className={tone(b.realized)}>{signed(b.realized)}</dd></div>
         </dl>
@@ -93,14 +101,13 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
         {b.rows.length > 0 && <button onClick={refresh}>{loading ? 'Loading' : 'Refresh prices'}</button>}
       </div>
       {b.rows.length === 0 ? (
-        <p className="note">No positions yet. Place a paper order below; it fills at the latest quote using pretend money.</p>
+        <p className="note">No positions yet. Place a paper order below; it fills at the latest quote using pretend money. Selling something you do not hold opens a short.</p>
       ) : (
         <>
-          <div className="alloc" role="img" aria-label={`${(100 - b.cashWeight).toFixed(0)}% invested, ${b.cashWeight.toFixed(0)}% cash`}>
-            {b.rows.map((r) => <i key={r.symbol} style={{ flexGrow: Math.max(r.weight, 0.5) }} />)}
-            {b.cashWeight > 0.5 && <i className="cash" style={{ flexGrow: b.cashWeight }} />}
+          <div className="alloc" role="img" aria-label={`Long ${ofEquity(b.longExp)} of account value, short ${ofEquity(b.shortExp)}`}>
+            {b.rows.map((r) => <i key={r.symbol} className={r.short ? 'short' : ''} style={{ flexGrow: Math.max(r.exposure, 1) }} />)}
           </div>
-          <div className="alloc-key num"><span>Invested {(100 - b.cashWeight).toFixed(1)}%</span><span>Cash {b.cashWeight.toFixed(1)}%</span></div>
+          <div className="alloc-key num"><span>Long ${money(b.longExp)} ({ofEquity(b.longExp)})</span><span>Short ${money(b.shortExp)} ({ofEquity(b.shortExp)})</span></div>
           <ul className="ledger">
             {b.rows.map((r) => {
               const h = name(r.symbol);
@@ -108,13 +115,16 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
                 <li key={r.symbol}>
                   <button className="qrow" onClick={() => onOpen(r.symbol)}>
                     <span className="who"><span className="sym">{labelOf(h)}</span><span className="name">{h.name}</span></span>
-                    <span className="tr num">${money(r.value)}</span>
-                    <span className="why num">{r.qty} {r.qty === 1 ? 'share' : 'shares'}, average cost {money(r.avgCost)}, {r.priced ? `now ${money(r.price)}` : 'price unavailable'}</span>
+                    <span className="tr num">${money(r.exposure)}</span>
+                    <span className="why num">
+                      <b className={r.short ? 'neg' : 'pos'}>{r.short ? 'Short' : 'Long'}</b> {Math.abs(r.qty)} {r.future ? (Math.abs(r.qty) === 1 ? 'contract' : 'contracts') : Math.abs(r.qty) === 1 ? 'share' : 'shares'}
+                      {r.future ? ` × ${r.mult.toLocaleString('en-US')}` : ''}, average {money(r.avgCost)}, {r.priced ? `now ${money(r.price)}` : 'price unavailable'}
+                    </span>
                     <span className="stats num">
                       <span className={tone(r.pnl)}>P/L {signed(r.pnl)} ({signed(r.pnlPct, 1)}%)</span>
                       <span>{r.weight.toFixed(1)}% of account</span>
                     </span>
-                    <span className="wbar"><i style={{ width: `${Math.min(100, r.weight)}%` }} /></span>
+                    <span className="wbar"><i className={r.short ? 'short' : ''} style={{ width: `${Math.min(100, r.weight)}%` }} /></span>
                   </button>
                 </li>
               );
@@ -127,7 +137,7 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
       <div className="section-h"><h2>Paper order</h2><span className="hint">Fills at the latest quote</span></div>
       <div className="order">
         <input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="Ticker" aria-label="Ticker symbol" autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
-        <input value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))} placeholder="Shares" aria-label="Number of shares" inputMode="numeric" />
+        <input value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))} placeholder="Qty" aria-label="Number of shares or contracts" inputMode="numeric" />
         <button className="btn" disabled={busy || !symbol.trim() || !qty} onClick={() => place('buy')}>Buy</button>
         <button className="btn sell" disabled={busy || !symbol.trim() || !qty} onClick={() => place('sell')}>Sell</button>
       </div>
@@ -155,7 +165,7 @@ function Paper({ list, finnhubKey, onOpen }: { list: Holding[]; finnhubKey: stri
       >
         {confirmReset ? 'Tap again to erase all paper positions and trades' : `Reset paper account to $${START_CASH.toLocaleString('en-US')}`}
       </button>
-      <p className="fine pad">Paper trading uses pretend money: whole shares, long only, no fees, filled instantly at the last quote, which can be delayed. Real fills differ. Not investment advice.</p>
+      <p className="fine pad">Paper trading uses pretend money, filled instantly at the last quote, which can be delayed, with no fees, borrow costs or dividends. Margin is simplified: long stock is paid in full, a short needs 50% of its value, and futures need 10% of contract value. Real brokers set different margins per contract and will close positions that run out of margin; this account does not. Not investment advice.</p>
     </>
   );
 }

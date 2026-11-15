@@ -1,17 +1,17 @@
 import { newAccount, type Account } from './paper';
-export interface Holding { symbol: string; name?: string; label?: string; q?: string }
+export interface Holding { symbol: string; name?: string; label?: string; q?: string; mult?: number } // mult: dollars per point for one futures contract
 
 // Futures and indexes: the data symbol, the label shown in the app, and the
 // news search used for headlines (a ticker search finds nothing for these).
 export const CATALOG: Record<string, Holding> = {
-  'CL=F': { symbol: 'CL=F', label: 'CLmain', name: 'Crude oil futures', q: '"crude oil" OR WTI OR OPEC when:3d' },
-  'NQ=F': { symbol: 'NQ=F', label: 'NQmain', name: 'Nasdaq 100 futures', q: '"Nasdaq 100" OR "Nasdaq futures" OR "tech stocks" when:3d' },
-  'UB=F': { symbol: 'UB=F', label: 'UBmain', name: 'Ultra T-Bond futures', q: '"Treasury yields" OR "Treasury bonds" OR "30-year yield" when:3d' },
-  'GC=F': { symbol: 'GC=F', label: 'GCmain', name: 'Gold futures', q: '"gold prices" OR "gold futures" OR bullion when:3d' },
+  'CL=F': { symbol: 'CL=F', mult: 1000, label: 'CLmain', name: 'Crude oil futures', q: '"crude oil" OR WTI OR OPEC when:3d' },
+  'NQ=F': { symbol: 'NQ=F', mult: 20, label: 'NQmain', name: 'Nasdaq 100 futures', q: '"Nasdaq 100" OR "Nasdaq futures" OR "tech stocks" when:3d' },
+  'UB=F': { symbol: 'UB=F', mult: 1000, label: 'UBmain', name: 'Ultra T-Bond futures', q: '"Treasury yields" OR "Treasury bonds" OR "30-year yield" when:3d' },
+  'GC=F': { symbol: 'GC=F', mult: 100, label: 'GCmain', name: 'Gold futures', q: '"gold prices" OR "gold futures" OR bullion when:3d' },
   'DX-Y.NYB': { symbol: 'DX-Y.NYB', label: 'USDindex', name: 'US Dollar Index', q: '"dollar index" OR DXY OR "US dollar" when:3d' },
-  'ES=F': { symbol: 'ES=F', label: 'ESmain', name: 'S&P 500 futures', q: '"S&P 500" OR "stock futures" when:3d' },
-  'ZN=F': { symbol: 'ZN=F', label: 'ZNmain', name: '10-year T-Note futures', q: '"10-year Treasury" OR "Treasury yields" when:3d' },
-  'HG=F': { symbol: 'HG=F', label: 'HGmain', name: 'Copper futures', q: '"copper prices" OR "copper futures" when:3d' },
+  'ES=F': { symbol: 'ES=F', mult: 50, label: 'ESmain', name: 'S&P 500 futures', q: '"S&P 500" OR "stock futures" when:3d' },
+  'ZN=F': { symbol: 'ZN=F', mult: 1000, label: 'ZNmain', name: '10-year T-Note futures', q: '"10-year Treasury" OR "Treasury yields" when:3d' },
+  'HG=F': { symbol: 'HG=F', mult: 25000, label: 'HGmain', name: 'Copper futures', q: '"copper prices" OR "copper futures" when:3d' },
 };
 const ALIAS: Record<string, string> = {
   CLMAIN: 'CL=F', NQMAIN: 'NQ=F', UBMAIN: 'UB=F', GCMAIN: 'GC=F', ESMAIN: 'ES=F', ZNMAIN: 'ZN=F', HGMAIN: 'HG=F',

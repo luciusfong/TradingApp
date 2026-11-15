@@ -328,9 +328,46 @@ describe('paper account', () => {
   });
   it('rejects orders it cannot fill', () => {
     const a = newAccount();
-    expect(() => applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 1000, price: 200 })).toThrow(/Not enough cash/);
-    expect(() => applyOrder(a, { symbol: 'AAPL', side: 'sell', qty: 1, price: 200 })).toThrow(/Short selling/);
+    expect(() => applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 1000, price: 200 })).toThrow(/Not enough buying power/);
+    expect(() => applyOrder(a, { symbol: 'AAPL', side: 'sell', qty: 1001, price: 200 })).toThrow(/Not enough buying power/);
     expect(() => applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 1.5, price: 200 })).toThrow(/whole number/);
+  });
+  it('sells short and buys to cover', () => {
+    let a = applyOrder(newAccount(), { symbol: 'TSLA', side: 'sell', qty: 100, price: 300 });
+    expect(a.positions.TSLA).toEqual({ qty: -100, avgCost: 300 });
+    expect(a.cash).toBe(130000);
+    let b = breakdown(a, { TSLA: 270 });
+    expect(b.equity).toBe(103000);
+    expect(b.rows[0]).toMatchObject({ short: true, exposure: 27000, pnl: 3000 });
+    expect(b.rows[0].pnlPct).toBeCloseTo(10);
+    expect(b.required).toBe(13500);
+    a = applyOrder(a, { symbol: 'TSLA', side: 'buy', qty: 100, price: 270 });
+    expect(a.positions.TSLA).toBeUndefined();
+    expect(a.realized).toBe(3000);
+    expect(a.cash).toBe(103000);
+    // selling more than is held flips the position
+    a = applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 10, price: 100 });
+    a = applyOrder(a, { symbol: 'AAPL', side: 'sell', qty: 30, price: 110 });
+    expect(a.positions.AAPL).toEqual({ qty: -20, avgCost: 110 });
+    expect(a.realized).toBe(3100);
+  });
+  it('trades futures on margin with a contract multiplier', () => {
+    let a = applyOrder(newAccount(), { symbol: 'ES=F', side: 'buy', qty: 2, price: 6000, mult: 50, future: true });
+    expect(a.cash).toBe(100000);
+    expect(a.positions['ES=F']).toEqual({ qty: 2, avgCost: 6000, mult: 50, future: true });
+    const b = breakdown(a, { 'ES=F': 6010 });
+    expect(b.rows[0].exposure).toBe(601000);
+    expect(b.rows[0].pnl).toBe(1000);
+    expect(b.equity).toBe(101000);
+    expect(b.required).toBeCloseTo(60100);
+    expect(() => applyOrder(a, { symbol: 'ES=F', side: 'buy', qty: 2, price: 6000 })).toThrow(/Not enough buying power/);
+    a = applyOrder(a, { symbol: 'ES=F', side: 'sell', qty: 3, price: 5990 });
+    expect(a.realized).toBe(-1000);
+    expect(a.cash).toBe(99000);
+    expect(a.positions['ES=F']).toMatchObject({ qty: -1, avgCost: 5990, mult: 50 });
+    // closing is always allowed, even with no buying power left
+    const broke = { ...a, cash: 0 };
+    expect(applyOrder(broke, { symbol: 'ES=F', side: 'buy', qty: 1, price: 5990 }).positions['ES=F']).toBeUndefined();
   });
   it('breaks positions down by value, profit and weight', () => {
     let a = newAccount();
@@ -344,7 +381,9 @@ describe('paper account', () => {
     expect(b.rows[1].pnlPct).toBeCloseTo(10);
     expect(b.rows[1].weight).toBeCloseTo(10.89, 1);
     expect(b.total).toBe(1000);
-    expect(b.cashWeight + b.rows[0].weight + b.rows[1].weight).toBeCloseTo(100);
+    expect(b.longExp).toBe(31000);
+    expect(b.shortExp).toBe(0);
+    expect(b.buyingPower).toBe(70000);
   });
 });
 
@@ -357,6 +396,6 @@ describe('widget data', () => {
       { s: 'CL=F', l: 'CLmain', n: 'Crude oil futures' },
     ]);
     const a = applyOrder(newAccount(), { symbol: 'AAPL', side: 'buy', qty: 10, price: 100 });
-    expect(widgetPaper(a)).toEqual({ cash: 99000, start: 100000, positions: [{ s: 'AAPL', l: 'AAPL', q: 10, c: 100 }] });
+    expect(widgetPaper(a)).toEqual({ cash: 99000, start: 100000, positions: [{ s: 'AAPL', l: 'AAPL', q: 10, c: 100, m: 1, f: false }] });
   });
 });

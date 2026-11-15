@@ -9,12 +9,12 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Paper account positions: value, profit or loss and share of the account. */
+/** Paper account positions: size, profit or loss and share of the account. Mirrors breakdown() in src/lib/paper.ts. */
 public class PositionsWidget extends BaseWidget {
     private static final class Pos {
         String label;
         double qty, value, pnl, pnlPct;
-        boolean priced;
+        boolean priced, future;
     }
 
     private static final class Book {
@@ -41,10 +41,12 @@ public class PositionsWidget extends BaseWidget {
             r.qty = p.optDouble("q", 0);
             r.priced = q != null && q.optDouble("p", 0) > 0;
             double price = r.priced ? q.optDouble("p", 0) : cost;
-            r.value = r.qty * price;
-            r.pnl = r.value - r.qty * cost;
-            r.pnlPct = cost > 0 ? (price - cost) / cost * 100 : 0;
-            b.equity += r.value;
+            double mult = p.optDouble("m", 1);
+            r.future = p.optBoolean("f", false);
+            r.value = Math.abs(r.qty) * price * mult;
+            r.pnl = (price - cost) * r.qty * mult;
+            r.pnlPct = cost > 0 ? (price - cost) / cost * 100 * Math.signum(r.qty) : 0;
+            b.equity += r.future ? r.pnl : r.qty * price;
             b.rows.add(r);
         }
         b.rows.sort((x, y) -> Double.compare(y.value, x.value));
@@ -76,9 +78,9 @@ public class PositionsWidget extends BaseWidget {
         int n = 0;
         for (Pos r : b.rows) {
             if (n >= maxRows) break;
-            String qty = r.qty == Math.rint(r.qty) ? String.valueOf((long) r.qty) : String.valueOf(r.qty);
+            String qty = (r.qty < 0 ? "Short " : "") + (long) Math.abs(r.qty);
             String weight = b.equity > 0 ? String.format(java.util.Locale.US, "%.1f%%", r.value / b.equity * 100) : "";
-            root.addView(R.id.rows, row(c, r.label, qty + " sh · " + weight, "$" + money(r.value),
+            root.addView(R.id.rows, row(c, r.label, qty + (r.future ? " ct · " : " sh · ") + weight, "$" + money(r.value),
                     r.priced ? signed(r.pnl, 2) + " (" + signed(r.pnlPct, 1) + "%)" : "at cost", tone(c, r.pnl)));
             n++;
         }
