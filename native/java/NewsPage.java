@@ -10,10 +10,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /** Latest market headlines. Tapping a headline opens the article. */
-public class NewsWidget extends BaseWidget {
+final class NewsPage extends WidgetPage {
     @Override
-    String title(Context c) {
-        return "Market news";
+    String name() {
+        return "News";
     }
 
     @Override
@@ -47,7 +47,7 @@ public class NewsWidget extends BaseWidget {
             String source = o.optString("s");
             r.setTextViewText(R.id.t2, (source.isEmpty() ? "" : source + " · ") + ago(o.optLong("at")));
             Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(o.optString("u"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            r.setOnClickPendingIntent(R.id.row, PendingIntent.getActivity(c, 100 + i, view, PI_FLAGS));
+            r.setOnClickPendingIntent(R.id.row, PendingIntent.getActivity(c, 100 + i, view, TradingWidget.PI_FLAGS));
             root.addView(R.id.rows, r);
             n++;
         }

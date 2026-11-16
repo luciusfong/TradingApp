@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { errorText } from './lib/http';
+import { gatewayBase, gatewayError, ibkrAccounts, ibkrPortfolio, type IbkrAccount, type LivePortfolio } from './lib/ibkr';
 import { getQuote } from './lib/market';
 import { applyOrder, breakdown, newAccount, START_CASH, type Account } from './lib/paper';
-import { syncWidgetPaper } from './lib/widget';
+import { syncWidgetPaper } from './lib/native';
 import { cleanSymbol, holdingFor, isFuture, labelOf, loadPaper, savePaper, type Holding } from './lib/store';
 
 type Book = 'paper' | 'live';
@@ -10,9 +11,12 @@ const money = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 
 const signed = (v: number, d = 2) => `${v > 0.004 ? '+' : v < -0.004 ? '−' : ''}${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`;
 const tone = (v: number) => (v > 0.004 ? 'pos' : v < -0.004 ? 'neg' : 'flat');
 const when = (t: number) => new Date(t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const clock = (t: number) => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+const ASSET: Record<string, string> = { STK: 'Stock', FUT: 'Future', OPT: 'Option', FOP: 'Futures option', CASH: 'Currency', CRYPTO: 'Crypto', BOND: 'Bond', FUND: 'Fund', CFD: 'CFD', WAR: 'Warrant' };
 
-export function Trading({ list, finnhubKey, onOpen, info, onToggleInfo }: {
+export function Trading({ list, finnhubKey, onOpen, info, onToggleInfo, gateway, onSettings }: {
   list: Holding[]; finnhubKey: string; onOpen: (symbol: string) => void; info: boolean; onToggleInfo: () => void;
+  gateway: string; onSettings: () => void;
 }) {
   const [book, setBook] = useState<Book>('paper');
   return (
@@ -22,7 +26,7 @@ export function Trading({ list, finnhubKey, onOpen, info, onToggleInfo }: {
         <button aria-pressed={book === 'live'} onClick={() => setBook('live')}>Live</button>
         <button className="info" aria-pressed={info} aria-label={info ? 'Hide explanations' : 'Show explanations'} onClick={onToggleInfo}>Info</button>
       </div>
-      {book === 'paper' ? <Paper list={list} finnhubKey={finnhubKey} onOpen={onOpen} info={info} /> : <Live />}
+      {book === 'paper' ? <Paper list={list} finnhubKey={finnhubKey} onOpen={onOpen} info={info} /> : <Live gateway={gateway} onSettings={onSettings} info={info} />}
     </>
   );
 }
@@ -173,15 +177,107 @@ function Paper({ list, finnhubKey, onOpen, info }: { list: Holding[]; finnhubKey
   );
 }
 
-function Live() {
+// Read-only view of an IBKR account through the Client Portal Gateway. Nothing here can place an order.
+function Live({ gateway, onSettings, info }: { gateway: string; onSettings: () => void; info: boolean }) {
+  const base = gatewayBase(gateway);
+  const [accounts, setAccounts] = useState<IbkrAccount[]>([]);
+  const [account, setAccount] = useState('');
+  const [data, setData] = useState<LivePortfolio | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [at, setAt] = useState(0);
+
+  const load = useCallback(async (pick?: string) => {
+    if (!base) return;
+    setLoading(true);
+    setError('');
+    try {
+      const list = await ibkrAccounts(base);
+      const id = pick && list.some((a) => a.id === pick) ? pick : list[0].id;
+      setAccounts(list);
+      setAccount(id);
+      setData(await ibkrPortfolio(base, id));
+      setAt(Date.now());
+    } catch (e) {
+      setError(gatewayError(e));
+    }
+    setLoading(false);
+  }, [base]);
+  useEffect(() => { load(); }, [load]);
+
+  if (!base) {
+    return (
+      <>
+        <div className="empty-state">
+          <b>No broker connected</b>
+          <span>Enter the address of your IBKR Client Portal Gateway in Settings to see your live account and positions here. The view is read-only.</span>
+          <button className="btn" onClick={onSettings}>Open Settings</button>
+        </div>
+      </>
+    );
+  }
+  const s = data?.summary;
+  const cur = s?.currency ?? '';
+  const amount = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${money(v)}${cur ? ` ${cur}` : ''}`);
   return (
     <>
-      <div className="empty-state">
-        <b>No broker connected</b>
-        <span>Live trading is not set up in this version. Once a broker account is linked, real orders and balances will show here.</span>
+      <section className="acct">
+        <div className="lbl">
+          IBKR net liquidation
+          {accounts.length > 1 ? (
+            <select className="acct-pick" value={account} aria-label="Account" onChange={(e) => load(e.target.value)}>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.id}</option>)}
+            </select>
+          ) : account ? `, ${account}` : ''}
+        </div>
+        <div className="px num">{s ? amount(s.netLiq) : loading ? <span className="spin">…</span> : '—'}</div>
+        {s && (
+          <dl className="kv num">
+            <div><dt>Cash</dt><dd>{amount(s.cash)}</dd></div>
+            <div><dt>Buying power</dt><dd>{amount(s.buyingPower)}</dd></div>
+            <div><dt>Available funds</dt><dd>{amount(s.available)}</dd></div>
+            <div><dt>Positions</dt><dd>{data.positions.length}</dd></div>
+          </dl>
+        )}
+      </section>
+      {error && <div className="err">{error}</div>}
+
+      <div className="section-h">
+        <h2>Position breakdown</h2>
+        <button onClick={() => load(account)}>{loading ? 'Loading' : at ? `${clock(at)} · Refresh` : 'Refresh'}</button>
       </div>
-      <div className="section-h"><h2>Position breakdown</h2></div>
-      <p className="note">Your live positions, their value, profit or loss and share of the account will be listed here after a broker is connected.</p>
+      {data && data.positions.length === 0 && <p className="note">No open positions in this account.</p>}
+      {data && data.positions.length > 0 && (
+        <ul className="ledger">
+          {data.positions.map((r) => {
+            const short = r.qty < 0;
+            // A share of the account only makes sense when the position is in the account's currency.
+            const weight = s?.netLiq && r.currency === cur ? (Math.abs(r.value) / s.netLiq) * 100 : null;
+            return (
+              <li key={r.key}>
+                <div className="qrow">
+                  <span className="who"><span className="sym">{r.symbol}</span><span className="name">{r.desc !== r.symbol ? r.desc : ASSET[r.assetClass] ?? r.assetClass}</span></span>
+                  <span className="tr num">{money(Math.abs(r.value))} {r.currency}</span>
+                  <span className="why num">
+                    <b className={short ? 'neg' : 'pos'}>{short ? 'Short' : 'Long'}</b> {Math.abs(r.qty).toLocaleString('en-US')}, average cost {money(r.avgCost)}, now {money(r.price)}
+                  </span>
+                  <span className="stats num">
+                    <span className={tone(r.pnl)}>P/L {signed(r.pnl)}{r.pnlPct === null ? '' : ` (${signed(r.pnlPct, 1)}%)`}</span>
+                    {weight !== null && <span>{weight.toFixed(1)}% of account</span>}
+                  </span>
+                  {weight !== null && <span className="wbar"><i className={short ? 'short' : ''} style={{ width: `${Math.min(100, weight)}%` }} /></span>}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {info && (
+        <p className="fine pad">
+          Read-only figures from your IBKR Client Portal Gateway; they are IBKR's own values and can lag the market. The gateway must be
+          running and logged in on your computer, and IBKR asks for a fresh login about once a day. This app cannot place live orders.
+        </p>
+      )}
     </>
   );
 }

@@ -30,12 +30,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Data for the home-screen widgets. The watchlist and paper account are written by the
+ * Data for the home-screen widget. The watchlist and paper account are written by the
  * web app through Capacitor Preferences; quotes and headlines are fetched here so the
- * widgets stay current while the app is closed.
+ * widget stays current while the app is closed.
  */
 final class WidgetData {
-    private static final String PREFS = "ta_widget";
+    static final String PREFS = "ta_widget";
     private static final String UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36";
     private static final Object LOCK = new Object();
     private static final long FRESH_MS = 5 * 60_000L;
@@ -154,7 +154,7 @@ final class WidgetData {
         }
     }
 
-    private static String get(String url) throws Exception {
+    static String get(String url) throws Exception {
         HttpURLConnection h = (HttpURLConnection) new URL(url).openConnection();
         h.setConnectTimeout(5000);
         h.setReadTimeout(6000);

@@ -10,7 +10,7 @@ export function sma(a: number[], n: number): number | null {
 export function stdev(a: number[]): number {
   if (a.length < 2) return 0;
   const m = a.reduce((x, y) => x + y, 0) / a.length;
-  return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / (a.length - 1));
+  return Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / (a.length - 1));
 }
 // Percent return over the last n sessions, optionally skipping the most recent `skip`.
 export function ret(a: number[], n: number, skip = 0): number | null {
@@ -51,14 +51,19 @@ export function annualVol(a: number[], n = 20): number | null {
   return stdev(r) * Math.sqrt(252) * 100;
 }
 
+// Every screen takes its thresholds as parameters. The defaults are the published
+// rules; the Screener's filter panel lets the user change them.
+export interface MacroParams { fast: number; slow: number }
+export const MACRO_DEFAULT: MacroParams = { fast: 50, slow: 200 };
+
 export type Trend = 'up' | 'down' | 'mixed';
-export function trendOf(a: number[]): Trend {
+export function trendOf(a: number[], fast = MACRO_DEFAULT.fast, slow = MACRO_DEFAULT.slow): Trend {
   const p = last(a);
-  const m50 = sma(a, 50);
-  const m200 = sma(a, Math.min(200, a.length));
-  if (m50 === null || m200 === null) return 'mixed';
-  if (p > m50 && m50 > m200) return 'up';
-  if (p < m50 && m50 < m200) return 'down';
+  const mFast = sma(a, fast);
+  const mSlow = sma(a, Math.min(slow, a.length));
+  if (mFast === null || mSlow === null) return 'mixed';
+  if (p > mFast && mFast > mSlow) return 'up';
+  if (p < mFast && mFast < mSlow) return 'down';
   return 'mixed';
 }
 
@@ -71,12 +76,12 @@ export interface MacroRow {
   vs200: number | null; // percent above/below the 200-day average
   spark: number[]; // last ~3 months
 }
-export function macroRow(symbol: string, closes: number[]): MacroRow {
+export function macroRow(symbol: string, closes: number[], p: MacroParams = MACRO_DEFAULT): MacroRow {
   const m200 = sma(closes, Math.min(200, closes.length));
   return {
     symbol,
     price: last(closes),
-    trend: trendOf(closes),
+    trend: trendOf(closes, p.fast, p.slow),
     r1m: ret(closes, 21),
     r3m: ret(closes, 63),
     vs200: m200 ? (last(closes) / m200 - 1) * 100 : null,
@@ -116,7 +121,7 @@ export function macroRead(rows: Record<string, MacroRow | undefined>): MacroRead
           ? 'The equity trend is running against liquidity. Rallies like this are more fragile.'
           : stocks === 'down' && bonds === 'up' && dollar === 'down'
             ? 'Stocks are weak even though liquidity is easing. Watch for a turn; this is where reversals often start.'
-            : 'Nasdaq 100 futures versus their 50-day and 200-day averages.',
+            : 'Stock index futures versus their fast and slow averages.',
     });
   }
   if (oil && gold) {
@@ -147,23 +152,27 @@ export interface QuantRow {
   strength: number; // for ranking
 }
 
+export interface QuantParams { z: number; rsiLow: number; rsiHigh: number; mom: number }
+export const QUANT_DEFAULT: QuantParams = { z: 2, rsiLow: 5, rsiHigh: 95, mom: 20 };
+export const QUANT_SIGNALS: QuantSignal[] = ['dip-uptrend', 'spike-downtrend', 'stretched-down', 'stretched-up', 'momentum'];
+
 // Simple statistical screen: short-term mean reversion conditioned on the
 // long-term trend, plus medium-term momentum.
-export function quantRow(symbol: string, closes: number[]): QuantRow {
+export function quantRow(symbol: string, closes: number[], p: QuantParams = QUANT_DEFAULT): QuantRow {
   const z = zscore(closes, 20);
   const r2 = rsi(closes, 2);
   const mom = ret(closes, 105, 21);
   const vol = annualVol(closes, 20);
   const m200 = sma(closes, Math.min(200, closes.length));
   const above200 = closes.length >= 120 && m200 ? last(closes) > m200 : null;
-  const low = (z !== null && z <= -2) || (r2 !== null && r2 <= 5);
-  const high = (z !== null && z >= 2) || (r2 !== null && r2 >= 95);
+  const low = (z !== null && z <= -p.z) || (r2 !== null && r2 <= p.rsiLow);
+  const high = (z !== null && z >= p.z) || (r2 !== null && r2 >= p.rsiHigh);
   let signal: QuantSignal = 'none';
   if (low && above200 === true) signal = 'dip-uptrend';
   else if (high && above200 === false) signal = 'spike-downtrend';
-  else if (z !== null && z <= -2) signal = 'stretched-down';
-  else if (z !== null && z >= 2) signal = 'stretched-up';
-  else if (mom !== null && mom >= 20 && above200 === true && z !== null && Math.abs(z) < 1.5) signal = 'momentum';
+  else if (z !== null && z <= -p.z) signal = 'stretched-down';
+  else if (z !== null && z >= p.z) signal = 'stretched-up';
+  else if (mom !== null && mom >= p.mom && above200 === true && z !== null && Math.abs(z) < 1.5) signal = 'momentum';
   const strength = (signal === 'none' ? 0 : signal === 'momentum' ? 1 : 2) + Math.abs(z ?? 0) / 10;
   return { symbol, price: last(closes), z, rsi2: r2, mom, vol, above200, signal, strength };
 }
@@ -176,6 +185,18 @@ export const SIGNAL_TEXT: Record<QuantSignal, { label: string; tone: 'pos' | 'ne
   momentum: { label: 'Steady momentum', tone: 'pos', why: 'Up 20% or more over six months, above the 200-day average and not stretched.' },
   none: { label: 'No signal', tone: 'flat', why: '' },
 };
+
+// The explanation for a signal, worded with the thresholds actually in use.
+export function signalWhy(signal: QuantSignal, p: QuantParams = QUANT_DEFAULT): string {
+  switch (signal) {
+    case 'dip-uptrend': return `Sharply below its 20-day average (z-score ${-p.z} or lower, or RSI(2) at ${p.rsiLow} or lower) while still above the 200-day. Short-term mean reversion has historically favoured a bounce.`;
+    case 'spike-downtrend': return `Sharply above its 20-day average (z-score ${p.z} or higher, or RSI(2) at ${p.rsiHigh} or higher) while below the 200-day. Short-term mean reversion has historically favoured a fade.`;
+    case 'stretched-down': return `More than ${p.z} standard deviations below its 20-day average, without a supporting long-term trend.`;
+    case 'stretched-up': return `More than ${p.z} standard deviations above its 20-day average.`;
+    case 'momentum': return `Up ${p.mom}% or more over six months, above the 200-day average and not stretched.`;
+    default: return '';
+  }
+}
 
 // ---------- Technical: Minervini trend template (stocks) ----------
 
@@ -202,7 +223,12 @@ export interface TemplateRow {
   fromLow: number; // percent above 52-week low
 }
 
-export function trendTemplate(symbol: string, a: number[]): TemplateRow | null {
+export interface TemplateParams { lowPct: number; highPct: number; rsMin: number }
+export const TEMPLATE_DEFAULT: TemplateParams = { lowPct: 30, highPct: 25, rsMin: 70 };
+export const templateShort = (p: TemplateParams = TEMPLATE_DEFAULT) =>
+  ['above 150/200-day', '150 over 200-day', '200-day rising', '50 over 150/200-day', 'above 50-day', `${p.lowPct}% off low`, `within ${p.highPct}% of high`, `relative strength ${p.rsMin}+`];
+
+export function trendTemplate(symbol: string, a: number[], tp: TemplateParams = TEMPLATE_DEFAULT): TemplateRow | null {
   if (a.length < 222) return null;
   const p = last(a);
   const m50 = sma(a, 50)!;
@@ -217,8 +243,8 @@ export function trendTemplate(symbol: string, a: number[]): TemplateRow | null {
     m200 > m200Prev,
     m50 > m150 && m50 > m200,
     p > m50,
-    p >= lo * 1.3,
-    p >= hi * 0.75,
+    p >= lo * (1 + tp.lowPct / 100),
+    p >= hi * (1 - tp.highPct / 100),
   ];
   // Recent quarter counts double, as in the usual relative-strength ranking.
   const q = [ret(a, 63), ret(a, 63, 63), ret(a, 63, 126), ret(a, Math.min(63, a.length - 190), 189)];
@@ -227,15 +253,23 @@ export function trendTemplate(symbol: string, a: number[]): TemplateRow | null {
 }
 
 // Adds the relative-strength percentile; only meaningful with enough names to rank.
-export function rankTemplate(rows: TemplateRow[], minNames = 8): TemplateRow[] {
+export function rankTemplate(rows: TemplateRow[], minNames = 8, rsMin = TEMPLATE_DEFAULT.rsMin): TemplateRow[] {
   if (rows.length < minNames) return [...rows].sort((x, y) => y.passed - x.passed || y.rsRaw - x.rsRaw);
   const sorted = [...rows].sort((x, y) => x.rsRaw - y.rsRaw);
   const ranked = rows.map((r) => {
     const rs = Math.max(1, Math.min(99, Math.round((sorted.indexOf(r) / (rows.length - 1)) * 98 + 1)));
-    const checks = [...r.checks.slice(0, 7), rs >= 70];
+    const checks = [...r.checks.slice(0, 7), rs >= rsMin];
     return { ...r, rs, checks, passed: checks.filter(Boolean).length };
   });
   return ranked.sort((x, y) => y.passed - x.passed || y.rsRaw - x.rsRaw);
+}
+
+// How a stock does against only the checks the user requires. A check that is
+// switched off, or that could not be computed (relative strength in a short list), is skipped.
+export function templateScore(r: TemplateRow, required: boolean[]): { total: number; passed: number; fails: number[] } {
+  const used = r.checks.map((_, i) => i).filter((i) => required[i] !== false);
+  const fails = used.filter((i) => !r.checks[i]);
+  return { total: used.length, passed: used.length - fails.length, fails };
 }
 
 // ---------- Technical: Turtle-style trend following (futures) ----------
@@ -255,8 +289,9 @@ export interface TurtleState {
 
 // The slower Turtle system on closing prices: enter on a 55-day breakout,
 // leave on a 20-day break the other way.
-export function turtle(symbol: string, a: number[], enterN = 55, exitN = 20): TurtleState | null {
-  if (a.length < enterN + 2) return null;
+export function turtle(symbol: string, a: number[], enterN = 55, exitDays = 20): TurtleState | null {
+  if (a.length < Math.max(enterN + 2, 21)) return null;
+  const exitN = Math.min(exitDays, enterN); // the exit window can never be longer than the entry window
   const hiOf = (i: number, n: number) => Math.max(...a.slice(i - n, i));
   const loOf = (i: number, n: number) => Math.min(...a.slice(i - n, i));
   let pos: 1 | -1 | 0 = 0;

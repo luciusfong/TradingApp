@@ -87,17 +87,17 @@ export function eventOf(text: string): string | null {
   return null;
 }
 
-export type Category = 'sec' | 'fda' | 'insider' | 'institutional' | 'geopolitical' | 'tech' | 'financial' | 'economics' | 'ma' | 'corpfund' | 'other';
+export type Category = 'sec' | 'fda' | 'insider' | 'institutional' | 'geopolitical' | 'tech' | 'financial' | 'economics' | 'ma' | 'ipo' | 'corpfund' | 'other';
 export type Group = 'filings' | 'news' | 'corporate' | 'other';
 export const CATEGORY_NAME: Record<Category, string> = {
   sec: 'SEC filings', fda: 'FDA approvals', insider: 'Insider', institutional: 'Institutional',
   geopolitical: 'Geopolitical', tech: 'Tech', financial: 'Financial', economics: 'Economics',
-  ma: 'M&A', corpfund: 'Corporate funds', other: 'Other',
+  ma: 'M&A', ipo: 'IPOs', corpfund: 'Corporate funds', other: 'Other',
 };
 export const GROUPS: { id: Group; name: string; cats: Category[] }[] = [
   { id: 'filings', name: 'Filings', cats: ['sec', 'fda', 'insider', 'institutional'] },
   { id: 'news', name: 'News', cats: ['geopolitical', 'tech', 'financial', 'economics'] },
-  { id: 'corporate', name: 'Corporate', cats: ['ma', 'corpfund'] },
+  { id: 'corporate', name: 'Corporate', cats: ['ma', 'ipo', 'corpfund'] },
   { id: 'other', name: 'Other', cats: ['other'] },
 ];
 export const groupOf = (c: Category): Group => GROUPS.find((g) => g.cats.includes(c))!.id;
@@ -106,6 +106,7 @@ export const groupOf = (c: Category): Group => GROUPS.find((g) => g.cats.include
 const CATEGORIES: [Category, RegExp][] = [
   ['insider', /\binsider (buy|sell|sale|trad|purchas|transaction)|\bform 4\b|10b5-1|\b(ceo|cfo|coo|cto|director|chairman|president|executive|officer|founder)s? (sells?|sold|buys?|bought|dumps?|unloads?|offloads?|purchases?|acquires?) .{0,40}\b(shares|stock)\b/i],
   ['institutional', /\b13[fdg]\b|\bhedge funds?\b|\binstitutional (investors?|holders?|ownership|buying|selling)|\b(berkshire|blackrock|vanguard|state street|bridgewater|citadel|renaissance technologies|pershing square|ark invest|tiger global|norges bank|elliott management|soros)\b|\b(raises|boosts|trims|cuts|increases|reduces|takes|discloses|builds|exits|sells|dumps|adds to) .{0,30}\b(stake|position|holdings?)\b|\bactivist investor|\bpension funds?\b|\bsovereign wealth/i],
+  ['ipo', /\bipos?\b|\binitial public offering|\b(goes|going|go|went) public\b|\b(market|trading|stock market|nasdaq|nyse) debut\b|\bdebuts? on (the )?(nasdaq|nyse|new york stock exchange)|\bdirect listing|\bspac\b|\bupsized? offering|\bprices? (its )?(ipo|offering) at\b/i],
   ['sec', /\bsec filings?\b|\b(8-k|10-k|10-q|s-1|s-3|424b\d?|def ?14a|20-f|6-k)\b|\bform (8|10|s|20)-|\bfiles? (with the sec|for (an )?ipo|for bankruptcy|for chapter|a prospectus|registration)|\bfiled with the sec|\bproxy (statement|filing)|\bannual report\b|\b(regulatory|securities) filings?\b|\bshelf (offering|registration)|sec\.gov/i],
   ['fda', /\bfda\b|\bpdufa\b|\bclinical (trial|hold)|\bphase (1|2|3|i|ii|iii)\b|\bdrug approval|\b(nda|bla|snda)\b|510\(k\)|\bbreakthrough therapy|\bfast[- ]track designation|\borphan drug/i],
   ['ma', /\b(acquires?|acquired|acquiring|acquisition|merger|merges?|merged|takeover|buyout|spin[- ]?off|divest\w*|tender offer)\b|\bdeal to (buy|acquire)\b|\b(to|will) (buy|acquire) .{1,50} (for|in) \$/i],
@@ -218,6 +219,7 @@ export async function marketNews(): Promise<NewsItem[]> {
     fetchRss(`"FDA approval" OR "FDA approves" OR "FDA rejects" OR PDUFA when:${MARKET_DAYS}d`),
     fetchRss(`"insider buying" OR "insider selling" OR "Form 4" OR "hedge fund" stake when:${MARKET_DAYS}d`),
     fetchRss(`merger OR acquisition OR buyout OR "share buyback" when:${MARKET_DAYS}d`),
+    fetchRss(`IPO OR "initial public offering" OR "goes public" OR "market debut" when:${MARKET_DAYS}d`),
     fetchRss(`geopolitical OR sanctions OR tariffs markets when:${MARKET_DAYS}d`),
     fetchRss(`AI OR semiconductor OR "big tech" stocks when:${MARKET_DAYS}d`),
   ]);

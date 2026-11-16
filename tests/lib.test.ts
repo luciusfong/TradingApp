@@ -300,13 +300,17 @@ describe('news categories', () => {
     expect(categoryOf('Wall Street closes higher as bank earnings beat')).toBe('financial');
     expect(categoryOf('Sunny weather expected')).toBe('other');
     expect(categoryOf('Quarterly update', 'SEC.gov')).toBe('sec');
+    expect(categoryOf('Chipmaker files for IPO on Nasdaq')).toBe('ipo');
+    expect(categoryOf('Klarna shares jump in market debut')).toBe('ipo');
+    expect(categoryOf('Fintech prices its IPO at $24 a share')).toBe('ipo');
   });
   it('rolls categories up into major groups', () => {
     expect(groupOf('insider')).toBe('filings');
     expect(groupOf('fda')).toBe('filings');
     expect(groupOf('geopolitical')).toBe('news');
     expect(groupOf('ma')).toBe('corporate');
-    expect(GROUPS.flatMap((g) => g.cats).length).toBe(11);
+    expect(GROUPS.flatMap((g) => g.cats).length).toBe(12);
+    expect(groupOf('ipo')).toBe('corporate');
     expect(enrich(parseRss(RSS)).every((n) => !!n.category)).toBe(true);
   });
 });
@@ -387,7 +391,7 @@ describe('paper account', () => {
   });
 });
 
-import { widgetPaper, widgetWatchlist } from '../src/lib/widget';
+import { widgetPaper, widgetWatchlist } from '../src/lib/native';
 
 describe('widget data', () => {
   it('mirrors the watchlist and paper account for the home-screen widgets', () => {
@@ -397,5 +401,151 @@ describe('widget data', () => {
     ]);
     const a = applyOrder(newAccount(), { symbol: 'AAPL', side: 'buy', qty: 10, price: 100 });
     expect(widgetPaper(a)).toEqual({ cash: 99000, start: 100000, positions: [{ s: 'AAPL', l: 'AAPL', q: 10, c: 100, m: 1, f: false }] });
+  });
+});
+
+import { DEFAULT_FILTERS, fundaMatch, isDefaultFilter, macroMatch, normalizeFilters, quantMatch, screenSymbols, turtleMatch } from '../src/lib/filters';
+import { judge, qualityLabels, verdictWhy } from '../src/lib/fundamentals';
+import { signalWhy, templateScore, templateShort } from '../src/lib/screen';
+import { alertItems, alertKey } from '../src/lib/alerts';
+import { alertConfig } from '../src/lib/native';
+import { gatewayBase, gatewayError, parseAccounts, parsePositions, parseSummary } from '../src/lib/ibkr';
+import { HttpError } from '../src/lib/http';
+import { isIndexSymbol, majorCurrency, toLocal } from '../src/lib/market';
+
+describe('screener filters', () => {
+  it('cleans up saved filters and keeps related numbers consistent', () => {
+    const f = normalizeFilters({ universe: 'large', macro: { fast: 300, slow: 10, trend: 'sideways' }, quant: { z: 'x', rsiLow: 60, signals: ['momentum', 'nope'] }, tech: { enterN: 20, exitN: 50, checks: [false] }, funda: { pegCheap: 3, pegFair: 1, pegPricey: 2 } });
+    expect(f.universe).toBe('large');
+    expect(f.macro).toEqual({ trend: 'any', fast: 150, slow: 151 });
+    expect(f.quant.z).toBe(2);
+    expect(f.quant.rsiLow).toBe(49);
+    expect(f.quant.signals).toEqual(['momentum']);
+    expect(f.tech.exitN).toBe(20);
+    expect(f.tech.checks).toEqual([false, true, true, true, true, true, true, true]);
+    expect([f.funda.pegCheap, f.funda.pegFair, f.funda.pegPricey]).toEqual([3, 3, 3]);
+    expect(isDefaultFilter(f, 'quant')).toBe(false);
+    expect(isDefaultFilter(normalizeFilters(null), 'tech')).toBe(true);
+  });
+  it('applies adjustable quant thresholds', () => {
+    const calm = [...ramp(245, 100, 0.5), 222.4, 222.1, 221.6, 221.2, 220.6];
+    expect(quantRow('A', calm).signal).toBe('momentum'); // a mild dip is not a signal at the standard thresholds
+    const loose = quantRow('A', calm, { z: 0.5, rsiLow: 40, rsiHigh: 60, mom: 20 });
+    expect(loose.signal).toBe('dip-uptrend');
+    expect(quantMatch(loose, { ...DEFAULT_FILTERS.quant })).toBe(true);
+    expect(quantMatch(loose, { ...DEFAULT_FILTERS.quant, signals: ['momentum'] })).toBe(false);
+    expect(signalWhy('stretched-up', { z: 1.5, rsiLow: 5, rsiHigh: 95, mom: 20 })).toMatch(/1\.5 standard deviations/);
+  });
+  it('lets macro averages and the trend filter be changed', () => {
+    const a = [...ramp(200, 100, 0.5), ...ramp(50, 200, -1.2)];
+    expect(macroRow('X', a).trend).toBe('mixed');
+    expect(macroRow('X', a, { fast: 10, slow: 30 }).trend).toBe('down');
+    expect(macroMatch(macroRow('X', a), { trend: 'any', fast: 50, slow: 200 })).toBe(true);
+    expect(macroMatch(macroRow('X', a), { trend: 'up', fast: 50, slow: 200 })).toBe(false);
+  });
+  it('scores the trend template against only the required checks', () => {
+    const pullback = trendTemplate('PB', [...ramp(230, 100, 1), ...ramp(20, 320, -4)])!;
+    const all = templateScore(pullback, Array(8).fill(true));
+    expect(all.total).toBe(7); // relative strength is not ranked for a single stock
+    expect(all.fails).toEqual(pullback.checks.map((ok, i) => (ok ? -1 : i)).filter((i) => i >= 0));
+    expect(all.fails).toContain(6);
+    expect(all.passed).toBe(7 - all.fails.length);
+    // Switch off exactly the failing checks and the stock passes.
+    const required = Array.from({ length: 8 }, (_, i) => !all.fails.includes(i));
+    expect(templateScore(pullback, required)).toEqual({ total: 7 - all.fails.length, passed: 7 - all.fails.length, fails: [] });
+    const loose = trendTemplate('PB', [...ramp(230, 100, 1), ...ramp(20, 320, -4)], { lowPct: 30, highPct: 40, rsMin: 70 })!;
+    expect(loose.checks[6]).toBe(true);
+    expect(templateShort({ lowPct: 20, highPct: 15, rsMin: 80 })[5]).toBe('20% off low');
+    const many = rankTemplate(Array.from({ length: 10 }, (_, i) => trendTemplate(`S${i}`, ramp(250, 100, 0.1 + i * 0.1))!), 8, 20);
+    expect(many.filter((r) => r.checks[7]).length).toBeGreaterThan(rankTemplate(many.map((r) => ({ ...r })), 8, 90).filter((r) => r.checks[7]).length);
+  });
+  it('filters futures by position and never lets the exit window exceed the entry window', () => {
+    const flat = Array.from({ length: 80 }, (_, i) => 100 + (i % 2));
+    const long = turtle('L', [...flat, 103, 104, 105, 106])!;
+    expect(turtleMatch(long, { ...DEFAULT_FILTERS.tech, pos: 'open' })).toBe(true);
+    expect(turtleMatch(long, { ...DEFAULT_FILTERS.tech, pos: 'short' })).toBe(false);
+    expect(turtleMatch(turtle('F', flat)!, { ...DEFAULT_FILTERS.tech, pos: 'open' })).toBe(false);
+    expect(turtle('L', [...flat, 103, 104, 105, 106], 20, 60)!.pos).toBe(turtle('L', [...flat, 103, 104, 105, 106], 20, 20)!.pos);
+    expect(turtle('T', ramp(15, 1, 1), 10, 5)).toBeNull();
+  });
+  it('re-judges fundamentals when thresholds change, without new data', () => {
+    const f = parseMetrics('A', { peTTM: 60, epsGrowth5Y: 12, roeTTM: 40, netProfitMarginTTM: 25, 'totalDebt/totalEquityQuarterly': 0.2 });
+    expect(f.verdict).toBe('quality-pricey');
+    expect(judge(f, { ...DEFAULT_FILTERS.funda, pegFair: 6, pegPricey: 6 }).verdict).toBe('quality-fair');
+    expect(judge(f, { ...DEFAULT_FILTERS.funda, roeMin: 50, marginMin: 30, debtMax: 0.1 }).quality).toEqual([false, false, false, true]);
+    expect(fundaMatch(f, DEFAULT_FILTERS.funda)).toBe(false);
+    expect(fundaMatch(f, { ...DEFAULT_FILTERS.funda, verdicts: ['quality-pricey'] })).toBe(true);
+    expect(qualityLabels({ ...DEFAULT_FILTERS.funda, debtMax: 2 })[2]).toBe('Debt no more than 2 times equity');
+    expect(verdictWhy('quality-fair', { ...DEFAULT_FILTERS.funda, pegFair: 1.2 })).toMatch(/PEG 1\.2 or lower/);
+  });
+  it('lists what the alert job should look for', () => {
+    const list = [{ symbol: 'AAPL', name: 'Apple' }, CATALOG['CL=F']];
+    expect(screenSymbols(list, 'watchlist').stocks).toEqual(['AAPL']);
+    expect(screenSymbols(list, 'watchlist').quant).toEqual(['AAPL', 'CL=F']);
+    expect(screenSymbols(list, 'large').stocks.length).toBe(30);
+    const cfg = alertConfig(true, list, DEFAULT_FILTERS);
+    expect(cfg.on).toBe(true);
+    expect(cfg.futures).toContain('CL=F');
+    expect(cfg.labels['CL=F']).toBe('CLmain');
+    expect(cfg.labels.AAPL).toBeUndefined();
+    const dip = [...ramp(245, 100, 0.5), 215, 208, 200, 196, 192];
+    const up = ramp(250, 100, 0.6);
+    const items = alertItems({ AAPL: dip, 'CL=F': up, 'GC=F': ramp(250, 300, -0.5) }, cfg).map(alertKey);
+    expect(items).toContain('quant:AAPL:dip-uptrend');
+    expect(items).toContain('macro:CL=F:up');
+    expect(items).toContain('macro:GC=F:down');
+    expect(items).toContain('turtle:CL=F:long');
+    expect(alertItems({ 'CL=F': up }, { ...cfg, f: { ...cfg.f, macro: { ...cfg.f.macro, trend: 'down' } } }).some((i) => i.tab === 'macro')).toBe(false);
+  });
+});
+
+describe('IBKR gateway', () => {
+  it('tidies the address the user types', () => {
+    expect(gatewayBase(' 192.168.1.20:5000 ')).toBe('https://192.168.1.20:5000');
+    expect(gatewayBase('https://pc.tail1234.ts.net/v1/api/')).toBe('https://pc.tail1234.ts.net');
+    expect(gatewayBase('http://localhost:5000')).toBe('http://localhost:5000');
+    expect(gatewayBase('')).toBeNull();
+    expect(gatewayBase('not a url')).toBeNull();
+  });
+  it('reads accounts, positions and the summary from IBKR-shaped replies', () => {
+    expect(parseAccounts([{ id: 'U1234567', accountId: 'U1234567', accountTitle: 'Jane Doe', currency: 'USD' }, {}])).toEqual([{ id: 'U1234567', title: 'Jane Doe', currency: 'USD' }]);
+    const pos = parsePositions([
+      { acctId: 'U1234567', conid: 756733, contractDesc: 'SPY', position: 5.0, mktPrice: 471.16000365, mktValue: 2355.8, currency: 'USD', avgCost: 434.93, avgPrice: 434.93, realizedPnl: 0.0, unrealizedPnl: 181.15, assetClass: 'STK' },
+      { conid: 76792991, contractDesc: 'TSLA', ticker: 'TSLA', position: -7.0, mktPrice: 250.73399355, mktValue: -1755.14, currency: 'USD', avgCost: 221.67142855, unrealizedPnl: -203.44, assetClass: 'STK' },
+      { conid: 1, contractDesc: 'OLD', position: 0, mktValue: 0 },
+    ]);
+    expect(pos.map((p) => p.symbol)).toEqual(['SPY', 'TSLA']);
+    expect(pos[0]).toMatchObject({ qty: 5, value: 2355.8, avgCost: 434.93, pnl: 181.15, currency: 'USD' });
+    expect(pos[0].pnlPct).toBeCloseTo(8.33, 1);
+    expect(pos[1].qty).toBe(-7);
+    expect(pos[1].pnlPct).toBeCloseTo(-13.11, 1);
+    expect(parsePositions(null)).toEqual([]);
+    const sum = parseSummary({ netliquidation: { amount: 215587.72, currency: 'USD', isNull: false }, totalcashvalue: { amount: 10000 }, buyingpower: { amount: 36000 }, availablefunds: { amount: null } });
+    expect(sum).toEqual({ netLiq: 215587.72, cash: 10000, buyingPower: 36000, available: null, currency: 'USD' });
+    expect(parseSummary({}).netLiq).toBeNull();
+  });
+  it('explains connection failures', () => {
+    expect(gatewayError(new HttpError(401, 'x'))).toMatch(/not logged in/);
+    expect(gatewayError(new Error('javax.net.ssl.SSLHandshakeException: Trust anchor for certification path not found.'))).toMatch(/certificate/);
+    expect(gatewayError(new Error('Failed to connect to /192.168.1.20:5000'))).toMatch(/Could not reach/);
+    expect(gatewayError(new Error('Cleartext HTTP traffic to 192.168.1.20 not permitted'))).toMatch(/https/);
+  });
+});
+
+describe('local currency', () => {
+  it('combines the move in the ticker with the move in the exchange rate', () => {
+    const l = toLocal({ price: 110, prevClose: 100 }, { rate: 4.4, prev: 4.5 });
+    expect(l.price).toBeCloseTo(484);
+    expect(l.changePct).toBeCloseTo(7.556, 2);
+    expect(l.change).toBeCloseTo(34);
+    expect(toLocal({ price: 250, prevClose: 250 }, { rate: 5.7, prev: 5.7 }, 0.01).price).toBeCloseTo(14.25);
+  });
+  it('knows pence-quoted listings and index symbols', () => {
+    expect(majorCurrency('GBp')).toEqual(['GBP', 0.01]);
+    expect(majorCurrency('USD')).toEqual(['USD', 1]);
+    expect(isIndexSymbol('DX-Y.NYB')).toBe(true);
+    expect(isIndexSymbol('^GSPC')).toBe(true);
+    expect(isIndexSymbol('AAPL')).toBe(false);
+    expect(parseYahooQuote('1155.KL', { chart: { result: [{ meta: { regularMarketPrice: 10.2, chartPreviousClose: 10, currency: 'MYR' }, timestamp: [1], indicators: { quote: [{ close: [10.2] }] } }] } }).currency).toBe('MYR');
   });
 });

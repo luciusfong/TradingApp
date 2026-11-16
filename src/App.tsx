@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { Chart } from './Chart';
 import { Screener } from './Screener';
 import { Trading } from './Trading';
 import { errorText } from './lib/http';
-import { getQuote, getSeries, lookupName, type Quote, type Range, type Series } from './lib/market';
+import { loadFilters, saveFilters, type Filters } from './lib/filters';
+import { gatewayBase, gatewayError, ibkrAccounts } from './lib/ibkr';
+import { getFx, getQuote, getSeries, isIndexSymbol, lookupName, majorCurrency, toLocal, type Fx, type LocalPrice, type Quote, type Range, type Series } from './lib/market';
 import { CATEGORY_NAME, GROUPS, groupOf, MARKET_DAYS, marketNews, tickerNews, type Category, type Group, type NewsItem } from './lib/news';
 import { aggregate, type Label } from './lib/sentiment';
-import { syncWidgetPaper, syncWidgetWatchlist } from './lib/widget';
-import { cleanSymbol, holdingFor, labelOf, loadPaper, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
+import { syncAlerts, syncWidgetPaper, syncWidgetWatchlist, takeNavTab } from './lib/native';
+import { cleanSymbol, CURRENCIES, holdingFor, labelOf, loadPaper, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
 
 type Tab = 'watchlist' | 'screener' | 'news' | 'trading' | 'settings';
 const TABS: Tab[] = ['watchlist', 'screener', 'news', 'trading', 'settings'];
@@ -19,6 +23,13 @@ const signed = (v: number, d = 2) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.
 const dir = (v: number) => (v > 0.0001 ? 'pos' : v < -0.0001 ? 'neg' : 'flat');
 const arrow = (v: number) => (v > 0.0001 ? '▲' : v < -0.0001 ? '▼' : '■');
 const MOOD: Record<Label, string> = { positive: 'Positive', negative: 'Negative', neutral: 'Neutral' };
+function localMoney(v: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency, currencyDisplay: 'narrowSymbol' }).format(v);
+  } catch {
+    return `${currency} ${money(v)}`;
+  }
+}
 
 function ago(t: number): string {
   const m = Math.max(0, Math.round((Date.now() - t) / 60000));
@@ -124,7 +135,10 @@ export default function App() {
   const [news, setNews] = useState<Record<string, Load<NewsItem[]>>>({});
   const [market, setMarket] = useState<Load<NewsItem[]>>({ loading: false });
   const [editing, setEditing] = useState(false);
+  const [filters, setFilters] = useState<Filters>(loadFilters);
+  const [fx, setFx] = useState<Record<string, Fx>>({});
   const key = settings.finnhubKey;
+  const local = settings.currency;
   const listRef = useRef(list);
   listRef.current = list;
 
@@ -155,9 +169,48 @@ export default function App() {
   }, []);
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
-  // Keep the home-screen widgets in step with the app.
+  // Keep the home-screen widget and the background alert job in step with the app.
   useEffect(() => { syncWidgetWatchlist(list); }, [list]);
   useEffect(() => { syncWidgetPaper(loadPaper()); }, []);
+  useEffect(() => { syncAlerts(settings.notify, list, filters); }, [settings.notify, list, filters]);
+  // A tapped alert opens the app on the Screener.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState !== 'visible') return;
+      takeNavTab().then((t) => {
+        if (!t || !TABS.includes(t as Tab)) return;
+        if (location.hash.length > 1) location.hash = '';
+        setTab(t as Tab);
+      });
+    };
+    check();
+    document.addEventListener('visibilitychange', check);
+    return () => document.removeEventListener('visibilitychange', check);
+  }, []);
+
+  // Local-currency view: one exchange rate per currency the quotes are in, refreshed every few minutes.
+  const quoteCurrencies = useMemo(() => {
+    const set = new Set<string>();
+    for (const q of Object.values(quotes)) if (q.data) set.add(majorCurrency(q.data.currency ?? 'USD')[0]);
+    return [...set].sort().join(',');
+  }, [quotes]);
+  const fxTick = Math.floor(Math.max(0, ...Object.values(quotes).map((q) => q.at ?? 0)) / 300_000);
+  useEffect(() => {
+    if (!local) return;
+    let live = true;
+    for (const c of quoteCurrencies.split(',')) {
+      if (!c || c === local) continue;
+      getFx(c, local).then((v) => { if (live) setFx((m) => ({ ...m, [`${c}>${local}`]: v })); }).catch(() => { /* the local line is simply left out */ });
+    }
+    return () => { live = false; };
+  }, [local, quoteCurrencies, fxTick]);
+  const localOf = (symbol: string, q?: Quote): LocalPrice | null => {
+    if (!local || !q || isIndexSymbol(symbol)) return null;
+    const [currency, scale] = majorCurrency(q.currency ?? 'USD');
+    if (currency === local) return scale === 1 ? null : toLocal(q, { rate: 1, prev: 1 }, scale);
+    const rate = fx[`${currency}>${local}`];
+    return rate ? toLocal(q, rate, scale) : null;
+  };
   useEffect(() => {
     const id = setInterval(() => { if (document.visibilityState === 'visible') refreshAll(); }, 90_000);
     return () => clearInterval(id);
@@ -201,6 +254,7 @@ export default function App() {
     setList(next); saveWatchlist(next);
   };
   const updateSettings = (s: Settings) => { setSettings(s); saveSettings(s); };
+  const updateFilters = (f: Filters) => { setFilters(f); saveFilters(f); };
   const toggleInfo = () => updateSettings({ ...settings, showInfo: !settings.showInfo });
 
   if (detail && holding) {
@@ -209,6 +263,8 @@ export default function App() {
         holding={holding}
         quote={quotes[detail]}
         news={news[detail]}
+        local={localOf(detail, quotes[detail]?.data)}
+        currency={local}
         hideLow={settings.hideLowValue}
         onToggleLow={() => updateSettings({ ...settings, hideLowValue: !settings.hideLowValue })}
         onRefresh={() => loadSymbol(holding)}
@@ -241,6 +297,7 @@ export default function App() {
                 const n = news[h.symbol];
                 const mood = n?.data ? moodOf(n.data, settings.hideLowValue) : null;
                 const visible = n?.data?.filter((x) => !(settings.hideLowValue && x.lowValue)) ?? [];
+                const loc = localOf(h.symbol, q?.data);
                 return (
                   <li key={h.symbol}>
                     {editing ? (
@@ -267,6 +324,11 @@ export default function App() {
                       <span className={`chg num ${q?.data ? dir(q.data.change) : 'flat'}`}>
                         {q?.data ? `${arrow(q.data.change)} ${signed(q.data.changePct)}%` : q?.error ? 'No quote' : ''}
                       </span>
+                      {loc && (
+                        <span className="loc num">
+                          ≈ {localMoney(loc.price, local)} <span className={dir(loc.changePct)}>{arrow(loc.changePct)} {signed(loc.changePct)}%</span>
+                        </span>
+                      )}
                     </button>
                     )}
                   </li>
@@ -293,8 +355,8 @@ export default function App() {
             )}
           </>
         )}
-        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} info={settings.showInfo} onToggleInfo={toggleInfo} />}
-        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} info={settings.showInfo} onToggleInfo={toggleInfo} />}
+        {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} info={settings.showInfo} onToggleInfo={toggleInfo} filters={filters} onFilters={updateFilters} />}
+        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} info={settings.showInfo} onToggleInfo={toggleInfo} gateway={settings.ibkrUrl} onSettings={() => setTab('settings')} />}
         {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} />}
       </main>
       <nav className="tabs" aria-label="Sections">
@@ -357,7 +419,7 @@ function MoodCard({ items, hideLow, title }: { items: NewsItem[]; hideLow: boole
 }
 
 function Detail(p: {
-  holding: Holding; quote?: Load<Quote>; news?: Load<NewsItem[]>; hideLow: boolean;
+  holding: Holding; quote?: Load<Quote>; news?: Load<NewsItem[]>; hideLow: boolean; local: LocalPrice | null; currency: string;
   onToggleLow: () => void; onRefresh: () => void; onRemove: () => void; onAdd: () => void; inList: boolean;
 }) {
   const [range, setRange] = useState<Range>('1D');
@@ -385,6 +447,11 @@ function Detail(p: {
           <div className="co">{labelOf(p.holding)}{p.holding.name ? `, ${p.holding.name}` : ''}</div>
           <div className="px num">{q ? money(q.price) : '—'}</div>
           {q && <div className={`chg num ${dir(q.change)}`}>{arrow(q.change)} {signed(q.change)} ({signed(q.changePct)}%) today</div>}
+          {p.local && (
+            <div className="loc num">
+              ≈ {localMoney(p.local.price, p.currency)}, <span className={dir(p.local.change)}>{arrow(p.local.change)} {signed(p.local.change)} ({signed(p.local.changePct)}%)</span> today in {p.currency}
+            </div>
+          )}
           {p.quote?.error && !q && <div className="err" style={{ margin: '10px 0' }}>{p.quote.error}</div>}
         </div>
         <div className="ranges" role="group" aria-label="Chart range">
@@ -414,6 +481,38 @@ function Detail(p: {
 function SettingsView({ settings, onChange }: { settings: Settings; onChange: (s: Settings) => void }) {
   const [keyDraft, setKeyDraft] = useState(settings.finnhubKey);
   const saved = keyDraft.trim() === settings.finnhubKey;
+  const [ibDraft, setIbDraft] = useState(settings.ibkrUrl);
+  const [ibTest, setIbTest] = useState<{ ok: boolean; text: string } | 'busy' | null>(null);
+  const ibSaved = ibDraft.trim() === settings.ibkrUrl;
+  const [notifyMsg, setNotifyMsg] = useState('');
+  const testGateway = async () => {
+    const base = gatewayBase(ibDraft);
+    if (!base) { setIbTest({ ok: false, text: 'Enter the gateway address, for example https://192.168.1.20:5000.' }); return; }
+    setIbTest('busy');
+    try {
+      const accounts = await ibkrAccounts(base);
+      setIbTest({ ok: true, text: `Connected. Account ${accounts.map((a) => a.id).join(', ')}.` });
+    } catch (e) {
+      setIbTest({ ok: false, text: gatewayError(e) });
+    }
+  };
+  // Android 13 and later only shows notifications after the user allows them.
+  const setNotify = async (on: boolean) => {
+    setNotifyMsg('');
+    if (on && Capacitor.isNativePlatform()) {
+      try {
+        const r = await LocalNotifications.requestPermissions();
+        if (r.display !== 'granted') {
+          setNotifyMsg('Notifications are blocked for TradingApp. Allow them in Android settings, then switch this on again.');
+          return;
+        }
+      } catch (e) {
+        setNotifyMsg(errorText(e));
+        return;
+      }
+    }
+    onChange({ ...settings, notify: on });
+  };
   return (
     <div className="settings">
       <div className="field">
@@ -427,6 +526,35 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (s
           real-time US quotes and Finnhub's company news feed. The key stays on this phone.
         </p>
       </div>
+      <div className="field">
+        <label htmlFor="ib">IBKR gateway address</label>
+        <div className="row2">
+          <input id="ib" value={ibDraft} onChange={(e) => { setIbDraft(e.target.value); setIbTest(null); }} placeholder="https://computer-address:5000" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+          <button className="btn" disabled={ibSaved} onClick={() => onChange({ ...settings, ibkrUrl: ibDraft.trim() })}>{ibSaved && settings.ibkrUrl ? 'Saved' : 'Save'}</button>
+        </div>
+        <button className="test" disabled={ibTest === 'busy' || !ibDraft.trim()} onClick={testGateway}>{ibTest === 'busy' ? 'Testing' : 'Test connection'}</button>
+        {ibTest && ibTest !== 'busy' && (ibTest.ok ? <p className="help ok">{ibTest.text}</p> : <div className="err flush">{ibTest.text}</div>)}
+        <p className="help">
+          IBKR gives individual accounts no API key. The app reads from IBKR's Client Portal Gateway, a program that runs on a computer
+          you log in to; this is that computer's address. Read-only: the Trading tab shows your account and positions, and the app cannot place live orders.
+        </p>
+      </div>
+      <div className="field">
+        <label htmlFor="ccy">Also show prices in</label>
+        <select id="ccy" value={settings.currency} onChange={(e) => onChange({ ...settings, currency: e.target.value })}>
+          <option value="">Off</option>
+          {CURRENCIES.map(([c, name]) => <option key={c} value={c}>{c}, {name}</option>)}
+        </select>
+        <p className="help">Adds each price and today's change converted to this currency, so the change includes the exchange-rate move.</p>
+      </div>
+      <label className="toggle">
+        <span>
+          <b>Screener alerts</b>
+          <p className="help">Checks your Screener filters about once an hour in the background and notifies you of new matches on the Macro, Quant and Technical tabs.</p>
+          {notifyMsg && <p className="help warn">{notifyMsg}</p>}
+        </span>
+        <input type="checkbox" checked={settings.notify} onChange={(e) => setNotify(e.target.checked)} />
+      </label>
       <label className="toggle">
         <span>
           <b>Hide low-value articles</b>

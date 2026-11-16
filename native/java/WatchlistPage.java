@@ -6,9 +6,9 @@ import android.widget.RemoteViews;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-public class WatchlistWidget extends BaseWidget {
+final class WatchlistPage extends WidgetPage {
     @Override
-    String title(Context c) {
+    String name() {
         return "Watchlist";
     }
 

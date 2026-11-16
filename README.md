@@ -1,26 +1,52 @@
 # TradingApp
 
-US market data and news sentiment for Android. Part one of three (news + market data; algorithm; paper/live trading).
+US market data, news sentiment, screens and paper trading for Android. No server: everything runs on the phone.
 
-- Explanations of the screens and financial terms are hidden by default; the Info button (Screener, Trading) or Settings turns them on.
-- **Watchlist** (starts empty) with quotes, daily change and a sentiment tape (one bar per recent headline).
+- **Watchlist** (starts empty) with quotes, daily change and a sentiment tape (one bar per recent headline). Futures and the dollar index can be added by broker-style names: `CLmain`, `NQmain`, `UBmain`, `GCmain`, `ESmain`, `USDindex`.
 - **Ticker page** with price chart (1D to 1Y) and scored, de-duplicated headlines.
-- **Screener, Technical view:** Minervini trend template for stocks, Turtle-style 55/20-day breakout rule for futures.
-- **Screener, Fundamental view:** Lynch PEG plus Buffett-style quality checks, from Finnhub basic financials (needs the free key). Logic in `src/lib/fundamentals.ts`.
-- **Screener** with a macro view (liquidity read from bonds and the dollar, cross-asset trends) and a quant view (z-score, RSI(2), momentum signals) over the watchlist or 30 large caps. Logic in `src/lib/screen.ts`.
-- **Market news** with an overall mood score. Headlines are sorted into categories (`categoryOf` in `src/lib/news.ts`) and rolled up into Filings (SEC filings, FDA approvals, insider, institutional), News (geopolitical, tech, financial, economics), Corporate (M&A, corporate funds) and Other.
-- **Trading** tab with Paper and Live accounts. Paper is a $100,000 pretend account (long and short, stocks and the listed futures with contract multipliers, simplified margin, fills at the latest quote) with a position breakdown; logic in `src/lib/paper.ts`. Live is a placeholder until a broker is connected.
-- **Home-screen widgets:** Watchlist, Positions (paper account) and News. Native Android code in `widget/`, copied into the generated Android project by `scripts/add-widgets.mjs`. They fetch quotes and headlines themselves about every 30 minutes; tap the time to refresh.
-- Futures and the dollar index can be added by broker-style names: `CLmain`, `NQmain`, `UBmain`, `GCmain`, `ESmain`, `USDindex`.
-- **Sentiment** is scored on the phone with a finance word-and-phrase list (`src/lib/sentiment.ts`). No server.
+- **Local currency** (Settings, off by default): adds each price and today's change converted to a chosen currency, so the change includes the exchange-rate move. `toLocal` in `src/lib/market.ts`.
+- **Screener** with four tabs. Each tab's rules are adjustable filters whose defaults are the published rules; the list shows what matches, with the rest one tap away. Filter definitions in `src/lib/filters.ts`.
+  - Macro: liquidity read from bonds and the dollar, cross-asset trends (fast and slow averages, trend filter).
+  - Quant: z-score, RSI(2) and momentum signals over the watchlist or 30 large caps.
+  - Technical: Minervini trend template for stocks, Turtle-style breakout rule for futures.
+  - Fundamental: Lynch PEG plus Buffett-style quality checks, from Finnhub basic financials (needs the free key).
+  - Rules in `src/lib/screen.ts` and `src/lib/fundamentals.ts`.
+- **Screener alerts** (Settings, off by default): about once an hour an Android background job re-runs the Macro, Quant and Technical screens with your filters and notifies you of matches that were not there on its previous run. See "Native code" below.
+- **Market news** with an overall mood score, limited to the last 3 days. Headlines are sorted into categories (`categoryOf` in `src/lib/news.ts`) and rolled up into Filings (SEC filings, FDA approvals, insider, institutional), News (geopolitical, tech, financial, economics), Corporate (M&A, IPOs, corporate funds) and Other.
+- **Trading** tab with Paper and Live.
+  - Paper is a $100,000 pretend account (long and short, stocks and the listed futures with contract multipliers, simplified margin, fills at the latest quote) with a position breakdown; logic in `src/lib/paper.ts`.
+  - Live is a read-only view of an Interactive Brokers account. It cannot place orders. See "IBKR" below.
+- **Home-screen widget:** one widget with Watchlist, Positions (paper account) and News tabs. Android widgets cannot be swiped sideways, so tabs are tapped. It fetches quotes and headlines itself about every 30 minutes; tap the time to refresh.
+- **Sentiment** is scored on the phone with a finance word-and-phrase list (`src/lib/sentiment.ts`).
+- Explanations of the screens and financial terms are hidden by default; the Info button (Screener, Trading) or Settings turns them on.
 
 ## Data sources
 
 | Data | Source | Key |
 |---|---|---|
-| Quotes, charts | Yahoo Finance chart endpoint (unofficial) | none |
-| Real-time quotes, company news | Finnhub | optional free key, entered in Settings |
+| Quotes, charts, exchange rates | Yahoo Finance chart endpoint (unofficial) | none |
+| Real-time quotes, company news, fundamentals | Finnhub | optional free key, entered in Settings |
 | Headlines | Google News RSS | none |
+| Live account and positions | IBKR Client Portal Gateway | gateway address, entered in Settings |
+
+## IBKR
+
+Interactive Brokers gives individual accounts no API key. Their Web API is reached through the Client Portal Gateway, a Java program you download from IBKR, run on a computer and log in to in a browser on that computer. IBKR requires a fresh login about once a day, and an idle session times out after a few minutes; the app pings the gateway while the Live tab is in use.
+
+The Settings field takes the address of that gateway, and "Test connection" checks it. Two things stand between a phone and the gateway:
+
+- The gateway ships with a self-signed certificate, which Android rejects, and the app only makes HTTPS requests.
+- IBKR's documentation says API calls are to be made on the machine where the gateway was logged in.
+
+So the phone needs an HTTPS address with a trusted certificate that lives on that computer and forwards to the gateway (`https://localhost:5000`), for example Tailscale Serve or a reverse proxy with a real certificate. This path has not been tested against a real gateway yet. The code is `src/lib/ibkr.ts`: it calls `/tickle`, `/portfolio/accounts`, `/portfolio/{account}/summary` and `/portfolio/{account}/positions/{page}`, all read-only.
+
+## Native code
+
+The Android project is generated in CI by Capacitor (`npx cap add android`); it is not committed. The app's own native code lives in `native/` and is copied into the generated project, and registered in its manifest, by `scripts/add-native.mjs`:
+
+- `TradingWidget` and the `*Page` classes: the home-screen widget.
+- `ScreenerJob`, `ScreenerCheck`: the hourly alert job. It reads the symbols and filters the app mirrors into Capacitor Preferences (`alertConfig` in `src/lib/native.ts`).
+- `Screens.java`: the Screener's rules again, in Java, because the job runs without the web app. `tests/crosscheck.test.ts` writes `native/test/fixture.txt` (generated prices, filters and the alert keys the TypeScript rules produce) and `native/test/CrossCheck.java` checks that the Java rules produce the same keys. If you change a rule, regenerate the fixture with `UPDATE_FIXTURE=1 npm test` and bring `Screens.java` in line.
 
 ## Get the APK
 
@@ -30,8 +56,9 @@ Every push to `main` runs **Build APK** in GitHub Actions and publishes the resu
 
 ```
 npm install
-npm test        # sentiment, parsers, dedupe
-npm run dev     # UI in a browser (live data needs the phone build)
+npm test             # rules, parsers, paper account, filters
+npm run test:native  # Java alert rules against the TypeScript ones (needs a JDK)
+npm run dev          # UI in a browser (live data needs the phone build)
 ```
 
-The Android project is generated in CI by Capacitor (`npx cap add android`); it is not committed. `signing/debug.keystore` is a debug-grade key kept in the repo so each build can install over the previous one. Replace it with a private release key before distributing the app.
+`signing/debug.keystore` is a debug-grade key kept in the repo so each build can install over the previous one. Replace it with a private release key before distributing the app.

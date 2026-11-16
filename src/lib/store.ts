@@ -23,12 +23,24 @@ export const LARGE_CAPS = 'AAPL MSFT NVDA AMZN GOOGL META TSLA AVGO BRK-B JPM LL
 export const isFuture = (symbol: string) => !!CATALOG[symbol] || /=F$|=X$|\.NYB$|^\^/.test(symbol);
 export const labelOf = (h: Holding) => h.label ?? h.symbol;
 export const holdingFor = (symbol: string): Holding => CATALOG[symbol] ?? { symbol };
-export interface Settings { finnhubKey: string; hideLowValue: boolean; showInfo: boolean } // showInfo: explanations of the screens and financial terms
+export interface Settings {
+  finnhubKey: string;
+  hideLowValue: boolean;
+  showInfo: boolean; // explanations of the screens and financial terms
+  notify: boolean; // background alerts for new Screener matches
+  ibkrUrl: string; // address of the IBKR Client Portal Gateway
+  currency: string; // also show prices in this currency; empty for off
+}
+export const CURRENCIES: [string, string][] = [
+  ['MYR', 'Malaysian ringgit'], ['SGD', 'Singapore dollar'], ['USD', 'US dollar'], ['EUR', 'Euro'], ['GBP', 'British pound'],
+  ['JPY', 'Japanese yen'], ['AUD', 'Australian dollar'], ['CAD', 'Canadian dollar'], ['HKD', 'Hong Kong dollar'], ['CNY', 'Chinese yuan'],
+  ['INR', 'Indian rupee'], ['IDR', 'Indonesian rupiah'], ['THB', 'Thai baht'], ['PHP', 'Philippine peso'], ['KRW', 'South Korean won'], ['CHF', 'Swiss franc'],
+];
 
 // The watchlist starts empty. Earlier versions pre-filled it with these.
 const OLD_DEFAULTS = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'CL=F', 'NQ=F', 'UB=F', 'GC=F', 'DX-Y.NYB'];
 
-function read<T>(key: string, fallback: T): T {
+export function read<T>(key: string, fallback: T): T {
   try {
     const v = localStorage.getItem(key);
     return v ? (JSON.parse(v) as T) : fallback;
@@ -36,7 +48,7 @@ function read<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
-function write(key: string, value: unknown) {
+export function write(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage full or blocked */ }
 }
 
@@ -51,7 +63,7 @@ export function loadWatchlist(): Holding[] {
   return list;
 }
 export const saveWatchlist = (w: Holding[]) => write('ta.watchlist', w);
-export const loadSettings = () => ({ finnhubKey: '', hideLowValue: true, showInfo: false, ...read<Partial<Settings>>('ta.settings', {}) });
+export const loadSettings = () => ({ finnhubKey: '', hideLowValue: true, showInfo: false, notify: false, ibkrUrl: '', currency: '', ...read<Partial<Settings>>('ta.settings', {}) });
 export const saveSettings = (s: Settings) => write('ta.settings', s);
 
 export function cleanSymbol(input: string): string {

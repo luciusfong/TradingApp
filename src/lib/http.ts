@@ -32,6 +32,27 @@ export async function httpGet(url: string, as: 'json' | 'text'): Promise<any> {
   return as === 'json' ? res.json() : res.text();
 }
 
+export async function httpPost(url: string, body: unknown = {}): Promise<any> {
+  if (Capacitor.isNativePlatform()) {
+    const res = await CapacitorHttp.post({
+      url,
+      headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/json' },
+      data: body,
+      responseType: 'json',
+      connectTimeout: 12000,
+      readTimeout: 15000,
+    });
+    if (res.status < 200 || res.status >= 300) throw new HttpError(res.status, describe(res.status));
+    if (typeof res.data === 'string') {
+      try { return JSON.parse(res.data); } catch { return res.data; }
+    }
+    return res.data;
+  }
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw new HttpError(res.status, describe(res.status));
+  return res.json().catch(() => null);
+}
+
 function describe(status: number): string {
   if (status === 401 || status === 403) return 'Access refused. Check the API key in Settings.';
   if (status === 429) return 'Rate limit reached. Wait a minute and refresh.';
