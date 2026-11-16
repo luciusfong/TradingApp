@@ -47,3 +47,18 @@ export async function takeNavTab(): Promise<string | null> {
     return null;
   }
 }
+
+// Secrets (the Wise token) are kept apart from everything else: not in the
+// webview's storage, not in the settings object, and so never in a backup file.
+// On Android this store is also excluded from cloud backup and phone-to-phone
+// transfer (native/res/xml/backup_rules.xml and data_extraction_rules.xml).
+export async function loadSecret<T>(name: string): Promise<T | null> {
+  try {
+    const { value } = await Preferences.get({ key: `secret.${name}` });
+    return value ? (JSON.parse(value) as T) : null;
+  } catch {
+    return null;
+  }
+}
+export const saveSecret = (name: string, value: unknown) => Preferences.set({ key: `secret.${name}`, value: JSON.stringify(value) });
+export const removeSecret = (name: string) => Preferences.remove({ key: `secret.${name}` });

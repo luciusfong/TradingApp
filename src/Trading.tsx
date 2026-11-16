@@ -5,8 +5,10 @@ import { getQuote } from './lib/market';
 import { applyOrder, breakdown, newAccount, START_CASH, type Account } from './lib/paper';
 import { syncWidgetPaper } from './lib/native';
 import { cleanSymbol, holdingFor, isFuture, labelOf, loadPaper, savePaper, type Holding } from './lib/store';
+import type { WiseLink } from './lib/wise';
+import { WiseView } from './Wise';
 
-type Book = 'paper' | 'live';
+type Book = 'paper' | 'live' | 'wise';
 const money = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const signed = (v: number, d = 2) => `${v > 0.004 ? '+' : v < -0.004 ? '−' : ''}${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`;
 const tone = (v: number) => (v > 0.004 ? 'pos' : v < -0.004 ? 'neg' : 'flat');
@@ -14,9 +16,9 @@ const when = (t: number) => new Date(t).toLocaleString('en-US', { month: 'short'
 const clock = (t: number) => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 const ASSET: Record<string, string> = { STK: 'Stock', FUT: 'Future', OPT: 'Option', FOP: 'Futures option', CASH: 'Currency', CRYPTO: 'Crypto', BOND: 'Bond', FUND: 'Fund', CFD: 'CFD', WAR: 'Warrant' };
 
-export function Trading({ list, finnhubKey, onOpen, info, onToggleInfo, gateway, onSettings }: {
+export function Trading({ list, finnhubKey, onOpen, info, onToggleInfo, gateway, wise, onSettings }: {
   list: Holding[]; finnhubKey: string; onOpen: (symbol: string) => void; info: boolean; onToggleInfo: () => void;
-  gateway: string; onSettings: () => void;
+  gateway: string; wise: WiseLink | null; onSettings: () => void;
 }) {
   const [book, setBook] = useState<Book>('paper');
   return (
@@ -24,9 +26,12 @@ export function Trading({ list, finnhubKey, onOpen, info, onToggleInfo, gateway,
       <div className="modes" role="group" aria-label="Account">
         <button aria-pressed={book === 'paper'} onClick={() => setBook('paper')}>Paper</button>
         <button aria-pressed={book === 'live'} onClick={() => setBook('live')}>Live</button>
+        <button aria-pressed={book === 'wise'} onClick={() => setBook('wise')}>Wise</button>
         <button className="info" aria-pressed={info} aria-label={info ? 'Hide explanations' : 'Show explanations'} onClick={onToggleInfo}>Info</button>
       </div>
-      {book === 'paper' ? <Paper list={list} finnhubKey={finnhubKey} onOpen={onOpen} info={info} /> : <Live gateway={gateway} onSettings={onSettings} info={info} />}
+      {book === 'paper' && <Paper list={list} finnhubKey={finnhubKey} onOpen={onOpen} info={info} />}
+      {book === 'live' && <Live gateway={gateway} onSettings={onSettings} info={info} />}
+      {book === 'wise' && <WiseView link={wise} onSettings={onSettings} info={info} />}
     </>
   );
 }

@@ -87,17 +87,17 @@ export function eventOf(text: string): string | null {
   return null;
 }
 
-export type Category = 'sec' | 'fda' | 'insider' | 'institutional' | 'geopolitical' | 'tech' | 'financial' | 'economics' | 'ma' | 'ipo' | 'corpfund' | 'other';
+export type Category = 'sec' | 'fda' | 'insider' | 'institutional' | 'geopolitical' | 'tech' | 'financial' | 'economics' | 'ma' | 'ipo' | 'private' | 'corpfund' | 'other';
 export type Group = 'filings' | 'news' | 'corporate' | 'other';
 export const CATEGORY_NAME: Record<Category, string> = {
   sec: 'SEC filings', fda: 'FDA approvals', insider: 'Insider', institutional: 'Institutional',
   geopolitical: 'Geopolitical', tech: 'Tech', financial: 'Financial', economics: 'Economics',
-  ma: 'M&A', ipo: 'IPOs', corpfund: 'Corporate funds', other: 'Other',
+  ma: 'M&A', ipo: 'IPOs', private: 'Private markets', corpfund: 'Corporate funds', other: 'Other',
 };
 export const GROUPS: { id: Group; name: string; cats: Category[] }[] = [
   { id: 'filings', name: 'Filings', cats: ['sec', 'fda', 'insider', 'institutional'] },
   { id: 'news', name: 'News', cats: ['geopolitical', 'tech', 'financial', 'economics'] },
-  { id: 'corporate', name: 'Corporate', cats: ['ma', 'ipo', 'corpfund'] },
+  { id: 'corporate', name: 'Corporate', cats: ['ma', 'ipo', 'private', 'corpfund'] },
   { id: 'other', name: 'Other', cats: ['other'] },
 ];
 export const groupOf = (c: Category): Group => GROUPS.find((g) => g.cats.includes(c))!.id;
@@ -109,6 +109,8 @@ const CATEGORIES: [Category, RegExp][] = [
   ['ipo', /\bipos?\b|\binitial public offering|\b(goes|going|go|went) public\b|\b(market|trading|stock market|nasdaq|nyse) debut\b|\bdebuts? on (the )?(nasdaq|nyse|new york stock exchange)|\bdirect listing|\bspac\b|\bupsized? offering|\bprices? (its )?(ipo|offering) at\b/i],
   ['sec', /\bsec filings?\b|\b(8-k|10-k|10-q|s-1|s-3|424b\d?|def ?14a|20-f|6-k)\b|\bform (8|10|s|20)-|\bfiles? (with the sec|for (an )?ipo|for bankruptcy|for chapter|a prospectus|registration)|\bfiled with the sec|\bproxy (statement|filing)|\bannual report\b|\b(regulatory|securities) filings?\b|\bshelf (offering|registration)|sec\.gov/i],
   ['fda', /\bfda\b|\bpdufa\b|\bclinical (trial|hold)|\bphase (1|2|3|i|ii|iii)\b|\bdrug approval|\b(nda|bla|snda)\b|510\(k\)|\bbreakthrough therapy|\bfast[- ]track designation|\borphan drug/i],
+  // Private equity and venture capital: funding rounds, buyout firms, fund raises. Above M&A so a buyout by a private-equity firm lands here.
+  ['private', /\bprivate[- ]equity\b|\bventure[- ]capital\b|\bvc[- ]backed\b|\bvcs\b|\b(funding|financing|seed|pre-seed) round\b|\bseries [a-h]\b(?! shares)|\b(raises|raised|secures|secured|lands|landed) \$[\d.,]+ ?(billion|million|bn|mn|b|m)\b.{0,60}\b(round|valuation)\b|\b(closes|closed) .{0,40}\bfund\b|\bat an? \$[\d.,]+ ?(billion|million|bn|b|m)? ?valuation|\bunicorns?\b|\btake[- ]private\b|\bleveraged buyout|\blbo\b|\bbuyout (firm|fund|group|shop)s?\b|\bgrowth equity\b|\b(blackstone|kkr|carlyle|apollo global|tpg|thoma bravo|silver lake|bain capital|warburg pincus|advent international|vista equity|hellman & friedman|cvc capital|sequoia|andreessen horowitz|a16z|y combinator|founders fund|softbank vision fund|general catalyst|lightspeed venture)\b/i],
   ['ma', /\b(acquires?|acquired|acquiring|acquisition|merger|merges?|merged|takeover|buyout|spin[- ]?off|divest\w*|tender offer)\b|\bdeal to (buy|acquire)\b|\b(to|will) (buy|acquire) .{1,50} (for|in) \$/i],
   ['corpfund', /\b(buybacks?|repurchases?|repurchase program|dividends?|corporate venture|venture arm|capital (return|allocation)|capex|capital expenditures?|bitcoin treasury|treasury strategy|bond (sale|offering)|debt offering|share (sale|offering)|secondary offering)\b|\b(invests?|investing|to invest|commits?|pledges?) \$[\d.,]+ ?(billion|million|bn|mn|b|m)\b/i],
   ['geopolitical', /\bgeopolit|\b(war|wars|sanctions?|tariffs?|military|missiles?|invasion|ceasefire|nato|opec\+?|embargo|airstrikes?|coup|summit)\b|\btrade (war|deal|talks|truce|tensions)|\bexport (controls?|bans?|curbs)|\b(china|chinese|russia|russian|ukraine|iran|israel|taiwan|north korea|middle east|gaza|venezuela|beijing|kremlin|strait of hormuz|red sea)\b/i],
@@ -220,6 +222,7 @@ export async function marketNews(): Promise<NewsItem[]> {
     fetchRss(`"insider buying" OR "insider selling" OR "Form 4" OR "hedge fund" stake when:${MARKET_DAYS}d`),
     fetchRss(`merger OR acquisition OR buyout OR "share buyback" when:${MARKET_DAYS}d`),
     fetchRss(`IPO OR "initial public offering" OR "goes public" OR "market debut" when:${MARKET_DAYS}d`),
+    fetchRss(`"private equity" OR "venture capital" OR "funding round" OR buyout when:${MARKET_DAYS}d`),
     fetchRss(`geopolitical OR sanctions OR tariffs markets when:${MARKET_DAYS}d`),
     fetchRss(`AI OR semiconductor OR "big tech" stocks when:${MARKET_DAYS}d`),
   ]);

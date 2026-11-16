@@ -10,7 +10,9 @@ import { gatewayBase, gatewayError, ibkrAccounts } from './lib/ibkr';
 import { getFx, getQuote, getSeries, isIndexSymbol, lookupName, majorCurrency, toLocal, type Fx, type LocalPrice, type Quote, type Range, type Series } from './lib/market';
 import { CATEGORY_NAME, GROUPS, groupOf, MARKET_DAYS, marketNews, tickerNews, type Category, type Group, type NewsItem } from './lib/news';
 import { aggregate, type Label } from './lib/sentiment';
-import { syncAlerts, syncWidgetPaper, syncWidgetWatchlist, takeNavTab } from './lib/native';
+import { applyBackup, describeBackup, makeBackup, readBackup, shareBackup, type Backup } from './lib/backup';
+import { loadSecret, removeSecret, saveSecret, syncAlerts, syncWidgetPaper, syncWidgetWatchlist, takeNavTab } from './lib/native';
+import { wiseErrorText, wiseProfiles, type WiseLink } from './lib/wise';
 import { cleanSymbol, CURRENCIES, holdingFor, labelOf, loadPaper, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
 
 type Tab = 'watchlist' | 'screener' | 'news' | 'trading' | 'settings';
@@ -136,6 +138,9 @@ export default function App() {
   const [market, setMarket] = useState<Load<NewsItem[]>>({ loading: false });
   const [editing, setEditing] = useState(false);
   const [filters, setFilters] = useState<Filters>(loadFilters);
+  // The Wise token lives in its own store, apart from the settings (see loadSecret).
+  const [wise, setWise] = useState<WiseLink | null>(null);
+  useEffect(() => { loadSecret<WiseLink>('wise').then((v) => { if (v && typeof v.token === 'string' && v.token) setWise({ token: v.token, sandbox: v.sandbox === true }); }); }, []);
   const [fx, setFx] = useState<Record<string, Fx>>({});
   const key = settings.finnhubKey;
   const local = settings.currency;
@@ -356,8 +361,8 @@ export default function App() {
           </>
         )}
         {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} info={settings.showInfo} onToggleInfo={toggleInfo} filters={filters} onFilters={updateFilters} />}
-        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} info={settings.showInfo} onToggleInfo={toggleInfo} gateway={settings.ibkrUrl} onSettings={() => setTab('settings')} />}
-        {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} />}
+        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} info={settings.showInfo} onToggleInfo={toggleInfo} gateway={settings.ibkrUrl} wise={wise} onSettings={() => setTab('settings')} />}
+        {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} wise={wise} onWise={setWise} />}
       </main>
       <nav className="tabs" aria-label="Sections">
         {TABS.map((t) => (
@@ -478,7 +483,7 @@ function Detail(p: {
   );
 }
 
-function SettingsView({ settings, onChange }: { settings: Settings; onChange: (s: Settings) => void }) {
+function SettingsView({ settings, onChange, wise, onWise }: { settings: Settings; onChange: (s: Settings) => void; wise: WiseLink | null; onWise: (w: WiseLink | null) => void }) {
   const [keyDraft, setKeyDraft] = useState(settings.finnhubKey);
   const saved = keyDraft.trim() === settings.finnhubKey;
   const [ibDraft, setIbDraft] = useState(settings.ibkrUrl);
@@ -539,6 +544,7 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (s
           you log in to; this is that computer's address. Read-only: the Trading tab shows your account and positions, and the app cannot place live orders.
         </p>
       </div>
+      <WiseSettings wise={wise} onWise={onWise} />
       <div className="field">
         <label htmlFor="ccy">Also show prices in</label>
         <select id="ccy" value={settings.currency} onChange={(e) => onChange({ ...settings, currency: e.target.value })}>
@@ -547,6 +553,7 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (s
         </select>
         <p className="help">Adds each price and today's change converted to this currency, so the change includes the exchange-rate move.</p>
       </div>
+      <BackupSettings />
       <label className="toggle">
         <span>
           <b>Screener alerts</b>
@@ -572,6 +579,109 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (s
       <p className="fine">
         Sentiment is scored on this phone by matching finance words and phrases in each headline. It reads wording, not meaning, so
         treat it as a rough signal. Prices can be delayed. This app is for information only and is not investment advice.
+      </p>
+    </div>
+  );
+}
+
+function WiseSettings({ wise, onWise }: { wise: WiseLink | null; onWise: (w: WiseLink | null) => void }) {
+  const [token, setToken] = useState('');
+  const [sandbox, setSandbox] = useState(false);
+  const [state, setState] = useState<{ ok: boolean; text: string } | 'busy' | null>(null);
+  // The token is only stored once Wise has accepted it.
+  const connect = async () => {
+    const link: WiseLink = { token: token.trim(), sandbox };
+    setState('busy');
+    try {
+      const profiles = await wiseProfiles(link);
+      if (!profiles.length) throw new Error('Wise listed no profiles for this token.');
+      await saveSecret('wise', link);
+      onWise(link);
+      setToken('');
+      setState({ ok: true, text: `Connected to ${profiles.map((p) => p.name).join(', ')}.` });
+    } catch (e) {
+      setState({ ok: false, text: wiseErrorText(e) });
+    }
+  };
+  const remove = async () => {
+    await removeSecret('wise').catch(() => undefined);
+    onWise(null);
+    setState(null);
+  };
+  return (
+    <div className="field">
+      <label htmlFor="wise">Wise API token</label>
+      {wise ? (
+        <>
+          {(!state || state === 'busy') && <p className="help ok">Connected{wise.sandbox ? ' in test mode' : ''}.</p>}
+          {state && state !== 'busy' && state.ok && <p className="help ok">{state.text}</p>}
+          <button className="test" onClick={remove}>Remove token from this phone</button>
+        </>
+      ) : (
+        <>
+          <div className="row2">
+            <input id="wise" type="password" value={token} onChange={(e) => { setToken(e.target.value); setState(null); }} placeholder="Paste token" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+            <button className="btn" disabled={!token.trim() || state === 'busy'} onClick={connect}>{state === 'busy' ? 'Checking' : 'Connect'}</button>
+          </div>
+          <label className="check"><input type="checkbox" checked={sandbox} onChange={(e) => setSandbox(e.target.checked)} /> Test mode: this is a Wise sandbox token</label>
+          {state && state !== 'busy' && !state.ok && <div className="err flush">{state.text}</div>}
+        </>
+      )}
+      <p className="help">
+        Create the token in Wise under Settings, Integrations and tools, API tokens. The Trading tab then shows your balances and can draft a
+        transfer to a saved bank recipient. The app cannot pay for a transfer: you approve and pay each one inside Wise. The token stays on
+        this phone, is left out of backups, and can be revoked in Wise at any time. Treat it like a password.
+      </p>
+    </div>
+  );
+}
+
+function BackupSettings() {
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [found, setFound] = useState<Backup | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const save = async () => {
+    setFound(null);
+    try {
+      const shared = await shareBackup(makeBackup((k) => localStorage.getItem(k)));
+      setMsg(shared ? { ok: true, text: 'Backup file made. Keep it wherever you chose to send it.' } : null);
+    } catch (e) {
+      setMsg({ ok: false, text: errorText(e) });
+    }
+  };
+  const picked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const r = readBackup(await file.text());
+    if ('error' in r) { setFound(null); setMsg({ ok: false, text: r.error }); } else { setMsg(null); setFound(r.backup); }
+  };
+  const restore = () => {
+    if (!found) return;
+    applyBackup(found, (k) => localStorage.getItem(k), (k, v) => localStorage.setItem(k, v));
+    location.reload();
+  };
+  return (
+    <div className="field">
+      <label>Backup</label>
+      <div className="row2">
+        <button className="btn" onClick={save}>Save a backup</button>
+        <button className="btn sell" onClick={() => picker.current?.click()}>Restore from a file</button>
+        <input ref={picker} type="file" hidden onChange={picked} />
+      </div>
+      {found && (
+        <div className="card flush">
+          <span>{describeBackup(found)} Restoring replaces what is on this phone now.</span>
+          <div className="row2">
+            <button className="btn" onClick={restore}>Replace and restore</button>
+            <button className="btn quiet" onClick={() => setFound(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {msg && (msg.ok ? <p className="help ok">{msg.text}</p> : <div className="err flush">{msg.text}</div>)}
+      <p className="help">
+        Puts your watchlist, settings, Screener filters and paper account in one file. Android then asks where to send it: Google Drive,
+        OneDrive, Gmail or anywhere else. API keys and tokens are left out.
       </p>
     </div>
   );

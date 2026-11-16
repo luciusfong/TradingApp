@@ -309,7 +309,7 @@ describe('news categories', () => {
     expect(groupOf('fda')).toBe('filings');
     expect(groupOf('geopolitical')).toBe('news');
     expect(groupOf('ma')).toBe('corporate');
-    expect(GROUPS.flatMap((g) => g.cats).length).toBe(12);
+    expect(GROUPS.flatMap((g) => g.cats).length).toBe(13);
     expect(groupOf('ipo')).toBe('corporate');
     expect(enrich(parseRss(RSS)).every((n) => !!n.category)).toBe(true);
   });
@@ -547,5 +547,126 @@ describe('local currency', () => {
     expect(isIndexSymbol('^GSPC')).toBe(true);
     expect(isIndexSymbol('AAPL')).toBe(false);
     expect(parseYahooQuote('1155.KL', { chart: { result: [{ meta: { regularMarketPrice: 10.2, chartPreviousClose: 10, currency: 'MYR' }, timestamp: [1], indicators: { quote: [{ close: [10.2] }] } }] } }).currency).toBe('MYR');
+  });
+});
+
+import { applyBackup, backupName, describeBackup, makeBackup, readBackup } from '../src/lib/backup';
+import { parseBalances, parseProfiles, parseQuote, parseRecipients, parseTransfer, parseTransfers, wiseMessage } from '../src/lib/wise';
+
+describe('private markets news', () => {
+  it('files private equity and venture capital headlines', () => {
+    expect(categoryOf('Anthropic raises $10 billion at a $350 billion valuation')).toBe('private');
+    expect(categoryOf('Startup lands $50 million funding round led by Sequoia')).toBe('private');
+    expect(categoryOf('KKR to acquire healthcare group for $4 billion')).toBe('private');
+    expect(categoryOf('Blackstone closes $20 billion real estate fund')).toBe('private');
+    expect(categoryOf('Private equity firms circle UK retailer')).toBe('private');
+    expect(categoryOf('Fintech closes Series C to expand in Asia')).toBe('private');
+    expect(groupOf('private')).toBe('corporate');
+  });
+  it('leaves public-company deals and raises where they were', () => {
+    expect(categoryOf('Microsoft to acquire gaming studio for $2 billion')).toBe('ma');
+    expect(categoryOf('Apple announces $90 billion share buyback')).toBe('corpfund');
+    expect(categoryOf('Utility raises $2 billion in bond sale to fund new plants')).toBe('corpfund');
+    expect(categoryOf('VC-backed chip designer files for IPO')).toBe('ipo');
+    expect(categoryOf('Company converts Series A shares ahead of results')).not.toBe('private');
+    expect(GROUPS.flatMap((g) => g.cats).length).toBe(13);
+  });
+});
+
+describe('Wise', () => {
+  it('reads profiles in both of the shapes Wise has used', () => {
+    expect(parseProfiles([{ id: 11, type: 'PERSONAL', fullName: 'Sarah Jenkins' }, { id: 12, type: 'BUSINESS', businessName: 'Acme Ltd', fullName: 'Acme Ltd' }]))
+      .toEqual([{ id: 11, type: 'personal', name: 'Sarah Jenkins' }, { id: 12, type: 'business', name: 'Acme Ltd' }]);
+    expect(parseProfiles([{ id: 21, type: 'personal', details: { firstName: 'Oliver', lastName: 'Wilson' } }, { type: 'personal' }])).toEqual([{ id: 21, type: 'personal', name: 'Oliver Wilson' }]);
+    expect(parseProfiles({ error: 'x' })).toEqual([]);
+  });
+  it('reads balances and saved recipients', () => {
+    const balances = parseBalances([
+      { id: 1, currency: 'EUR', type: 'STANDARD', amount: { value: 0, currency: 'EUR' } },
+      { id: 2, currency: 'USD', type: 'STANDARD', amount: { value: 310.86, currency: 'USD' } },
+      { id: 3, currency: 'MYR' },
+    ]);
+    expect(balances).toEqual([{ id: 2, currency: 'USD', amount: 310.86 }, { id: 1, currency: 'EUR', amount: 0 }]);
+    const page = { content: [
+      { id: 40, currency: 'GBP', active: true, name: { fullName: 'John Doe' }, accountSummary: '(04-00-75) 37778842', longAccountSummary: 'GBP account ending in 8842', ownedByCustomer: false },
+      { id: 41, currency: 'MYR', active: true, accountHolderName: 'Me Myself', accountSummary: 'Maybank 1234', ownedByCustomer: true },
+      { id: 42, currency: 'USD', active: false, name: { fullName: 'Old' } },
+    ], seekPositionForNext: 42, size: 20 };
+    expect(parseRecipients(page)).toEqual([
+      { id: 40, currency: 'GBP', name: 'John Doe', summary: 'GBP account ending in 8842', own: false },
+      { id: 41, currency: 'MYR', name: 'Me Myself', summary: 'Maybank 1234', own: true },
+    ]);
+    expect(parseRecipients(null)).toEqual([]);
+  });
+  it('takes the pay-from-balance option out of a quote', () => {
+    const raw = {
+      id: 'a0123456-b789', sourceCurrency: 'USD', targetCurrency: 'MYR', sourceAmount: 1000, payOut: 'BANK_TRANSFER', rate: 4.42, expirationTime: '2026-11-16T06:00:00Z',
+      paymentOptions: [
+        { payIn: 'BANK_TRANSFER', payOut: 'BANK_TRANSFER', sourceAmount: 1000, targetAmount: 4390, fee: { total: 6.8 }, disabled: false },
+        { payIn: 'BALANCE', payOut: 'BANK_TRANSFER', sourceAmount: 1000, targetAmount: 4401.7, fee: { transferwise: 4.14, total: 4.14 }, formattedEstimatedDelivery: 'by Tuesday', disabled: false },
+      ],
+      notices: [{ text: 'You can have a maximum of 3 open transfers with a guaranteed rate.', link: null, type: 'WARNING' }],
+    };
+    expect(parseQuote(raw)).toEqual({
+      id: 'a0123456-b789', sourceCurrency: 'USD', targetCurrency: 'MYR', sourceAmount: 1000, targetAmount: 4401.7, fee: 4.14, rate: 4.42,
+      delivery: 'by Tuesday', expires: '2026-11-16T06:00:00Z', blocked: null, notices: ['You can have a maximum of 3 open transfers with a guaranteed rate.'],
+    });
+    const off = parseQuote({ ...raw, paymentOptions: [{ ...raw.paymentOptions[1], disabled: true, disabledReason: { code: 'x', message: 'Open a USD balance first.' } }] });
+    expect(off!.blocked).toBe('Open a USD balance first.');
+    expect(parseQuote({ ...raw, paymentOptions: [raw.paymentOptions[0]] })!.blocked).toMatch(/does not offer/);
+    expect(parseQuote({ ...raw, notices: [{ text: 'Not allowed.', type: 'BLOCKED' }] })!.blocked).toBe('Not allowed.');
+    expect(parseQuote({ paymentOptions: [] })).toBeNull();
+    expect(parseQuote({ ...raw, paymentOptions: [{ payIn: 'BALANCE', sourceAmount: 1000 }] })).toBeNull();
+  });
+  it('reads a draft transfer and explains errors', () => {
+    const t = parseTransfer({ id: 16521632, targetAccount: 8692237, quoteUuid: 'q', status: 'incoming_payment_waiting', rate: 4.42, created: '2026-11-16 05:30:00', details: { reference: 'to my bank' }, sourceCurrency: 'USD', sourceValue: 1000, targetCurrency: 'MYR', targetValue: 4401.7 });
+    expect(t).toEqual({ id: 16521632, status: 'incoming_payment_waiting', recipientId: 8692237, reference: 'to my bank', created: '2026-11-16 05:30:00', sourceCurrency: 'USD', sourceAmount: 1000, targetCurrency: 'MYR', targetAmount: 4401.7 });
+    expect(parseTransfer({ status: 'x' })).toBeNull();
+    expect(parseTransfers([{ id: 1 }, {}, { id: 2 }]).map((x) => x.id)).toEqual([1, 2]);
+    expect(wiseMessage(401, { error: 'unauthorized' })).toMatch(/did not accept the token/);
+    expect(wiseMessage(422, { errors: [{ code: 'NOT_VALID', message: 'Transfer purpose is required.', path: 'details.transferPurpose' }] })).toBe('Wise could not accept this: Transfer purpose is required.');
+    expect(wiseMessage(403, { message: 'Forbidden' })).toMatch(/read-only/);
+    expect(wiseMessage(500, null)).toBe('Wise answered with an error (500).');
+  });
+});
+
+describe('backup', () => {
+  const store = (init: Record<string, unknown>) => {
+    const m = new Map(Object.entries(init).map(([k, v]) => [k, JSON.stringify(v)]));
+    return { get: (k: string) => m.get(k) ?? null, set: (k: string, v: string) => { m.set(k, v); }, read: (k: string) => JSON.parse(m.get(k) ?? 'null') };
+  };
+  const phone = store({
+    'ta.watchlist': [{ symbol: 'AAPL' }, { symbol: 'NVDA' }],
+    'ta.settings': { finnhubKey: 'SECRET-KEY', hideLowValue: true, showInfo: false, notify: true, ibkrUrl: 'https://pc.example:5000', currency: 'MYR' },
+    'ta.filters': { universe: 'large' },
+    'ta.paper': { start: 100000, cash: 99000, realized: 0, positions: { AAPL: { qty: 10, avgCost: 100 } }, trades: [] },
+    'CapacitorStorage.secret.wise': { token: 'WISE-TOKEN' },
+  });
+  it('leaves keys and tokens out', () => {
+    const b = makeBackup(phone.get, new Date('2026-11-16T05:40:00Z'));
+    const text = JSON.stringify(b);
+    expect(text).not.toContain('SECRET-KEY');
+    expect(text).not.toContain('WISE-TOKEN');
+    expect((b.data['ta.settings'] as any).notify).toBe(false);
+    expect((b.data['ta.settings'] as any).currency).toBe('MYR');
+    expect(b.savedAt).toBe('2026-11-16T05:40:00.000Z');
+    expect(backupName(new Date('2026-11-16T05:40:00Z'))).toBe('TradingApp-backup-2026-11-16.json');
+    expect(describeBackup(b)).toMatch(/2 watchlist tickers, 1 paper position, settings/);
+  });
+  it('restores onto another phone and keeps that phone\'s own key', () => {
+    const text = JSON.stringify(makeBackup(phone.get));
+    const other = store({ 'ta.watchlist': [{ symbol: 'TSLA' }], 'ta.settings': { finnhubKey: 'OTHER-KEY', currency: '' } });
+    const r = readBackup(text);
+    expect('backup' in r).toBe(true);
+    if ('backup' in r) applyBackup(r.backup, other.get, other.set);
+    expect(other.read('ta.watchlist')).toEqual([{ symbol: 'AAPL' }, { symbol: 'NVDA' }]);
+    expect(other.read('ta.settings')).toMatchObject({ finnhubKey: 'OTHER-KEY', currency: 'MYR', notify: false, ibkrUrl: 'https://pc.example:5000' });
+    expect(other.read('ta.paper').cash).toBe(99000);
+    expect(other.read('ta.v3')).toBe(true);
+  });
+  it('rejects files that are not a backup', () => {
+    expect(readBackup('hello')).toEqual({ error: 'This file is not a TradingApp backup.' });
+    expect(readBackup(JSON.stringify({ app: 'Other', kind: 'backup', version: 1, data: {} }))).toHaveProperty('error');
+    expect(readBackup(JSON.stringify({ app: 'TradingApp', kind: 'backup', version: 2, savedAt: '', data: {} }))).toEqual({ error: 'This backup was made by a newer version of TradingApp. Update the app, then restore.' });
   });
 });

@@ -272,3 +272,20 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .settings .field + .field { margin-top: 22px; }
 .acct-pick { margin-left: 8px; background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 2px 6px; font: inherit; color: inherit; }
 div.qrow { cursor: default; }
+
+/* Wise and backup */
+.wform { display: grid; gap: 12px; padding: 4px 18px 6px; }
+.wform label { display: grid; gap: 5px; font-size: 12px; color: var(--ink-3); }
+.wform select, .wform input { width: 100%; min-width: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 11px 12px; font: inherit; font-size: 15px; color: var(--ink); }
+.card { margin: 12px 18px; padding: 14px 16px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; display: grid; gap: 10px; justify-items: start; }
+.card > span { font-size: 13px; color: var(--ink-2); }
+.card > .kv, .card > .err, .card > .help { justify-self: stretch; margin: 0; }
+.card > a.btn { text-decoration: none; }
+.card.flush { margin: 10px 0 0; }
+.kv.one { grid-template-columns: 1fr; border-top: 0; }
+.kv.one div:last-child { border-bottom: 0; }
+.trade .amt { font-weight: 600; font-size: 14px; }
+.trade .link.danger { color: var(--neg); font-weight: 600; font-size: 13px; white-space: nowrap; }
+.trade .link.danger:disabled { color: var(--ink-3); }
+.field .check { display: flex; align-items: center; gap: 8px; font-weight: 400; font-size: 13px; color: var(--ink-2); margin: 10px 0 0; }
+.field .check input { width: 18px; height: 18px; accent-color: var(--accent); }
