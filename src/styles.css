@@ -289,3 +289,15 @@ div.qrow { cursor: default; }
 .trade .link.danger:disabled { color: var(--ink-3); }
 .field .check { display: flex; align-items: center; gap: 8px; font-weight: 400; font-size: 13px; color: var(--ink-2); margin: 10px 0 0; }
 .field .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+/* Strategies */
+.pad.row2 { padding: 4px 18px 8px; }
+.btn.sell[aria-pressed='true'] { background: var(--ink); color: var(--paper); box-shadow: none; }
+.trade.rule { align-items: flex-start; }
+.trade.rule .acts { display: grid; gap: 6px; justify-items: end; }
+.trade.rule .acts .link { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.wform.card { margin: 6px 18px 12px; }
+.wform .row2 { display: grid; grid-template-columns: 1fr 80px auto; gap: 8px; align-items: center; }
+.wform > .row2:last-child { grid-template-columns: 1fr 1fr; }
+.toast { position: fixed; left: 12px; right: 12px; bottom: 72px; z-index: 20; background: var(--ink); color: var(--paper); padding: 12px 14px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+.pad-x { margin: 0 18px; }

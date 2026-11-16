@@ -15,7 +15,7 @@ export interface TechFilter extends TemplateParams {
   exitN: number; // futures: opposite window to exit
   pos: 'any' | 'open' | 'long' | 'short'; // futures to show
 }
-export interface FundaFilter extends FundaParams { verdicts: Verdict[] }
+export interface FundaFilter extends FundaParams { verdicts: Verdict[]; yieldMin: number } // yieldMin: minimum dividend yield, %
 export interface Filters { universe: Universe; macro: MacroFilter; quant: QuantFilter; tech: TechFilter; funda: FundaFilter }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -23,7 +23,7 @@ export const DEFAULT_FILTERS: Filters = {
   macro: { trend: 'any', fast: MACRO_DEFAULT.fast, slow: MACRO_DEFAULT.slow },
   quant: { z: QUANT_DEFAULT.z, rsiLow: QUANT_DEFAULT.rsiLow, rsiHigh: QUANT_DEFAULT.rsiHigh, mom: QUANT_DEFAULT.mom, signals: [...QUANT_SIGNALS] },
   tech: { checks: Array(8).fill(true), lowPct: TEMPLATE_DEFAULT.lowPct, highPct: TEMPLATE_DEFAULT.highPct, rsMin: TEMPLATE_DEFAULT.rsMin, enterN: 55, exitN: 20, pos: 'any' },
-  funda: { pegCheap: FUNDA_DEFAULT.pegCheap, pegFair: FUNDA_DEFAULT.pegFair, pegPricey: FUNDA_DEFAULT.pegPricey, roeMin: FUNDA_DEFAULT.roeMin, marginMin: FUNDA_DEFAULT.marginMin, debtMax: FUNDA_DEFAULT.debtMax, verdicts: ['quality-fair', 'garp'] },
+  funda: { pegCheap: FUNDA_DEFAULT.pegCheap, pegFair: FUNDA_DEFAULT.pegFair, pegPricey: FUNDA_DEFAULT.pegPricey, roeMin: FUNDA_DEFAULT.roeMin, marginMin: FUNDA_DEFAULT.marginMin, debtMax: FUNDA_DEFAULT.debtMax, verdicts: ['quality-fair', 'garp'], yieldMin: 0 },
 };
 
 // Allowed range for each number, also used by the inputs.
@@ -31,7 +31,7 @@ export const LIMITS = {
   fast: [5, 150], slow: [20, 250],
   z: [0.5, 5], rsiLow: [0, 49], rsiHigh: [51, 100], mom: [0, 300],
   lowPct: [0, 300], highPct: [1, 95], rsMin: [1, 99], enterN: [10, 120], exitN: [5, 120],
-  pegCheap: [0.1, 10], pegFair: [0.1, 10], pegPricey: [0.1, 10], roeMin: [0, 100], marginMin: [0, 100], debtMax: [0, 20],
+  pegCheap: [0.1, 10], pegFair: [0.1, 10], pegPricey: [0.1, 10], roeMin: [0, 100], marginMin: [0, 100], debtMax: [0, 20], yieldMin: [0, 20],
 } as const;
 
 const num = (v: unknown, fallback: number, [lo, hi]: readonly [number, number]) =>
@@ -78,6 +78,7 @@ export function normalizeFilters(raw: any): Filters {
       marginMin: num(f.marginMin, d.funda.marginMin, LIMITS.marginMin),
       debtMax: num(f.debtMax, d.funda.debtMax, LIMITS.debtMax),
       verdicts: Array.isArray(f.verdicts) ? FUNDA_VERDICTS.filter((x) => f.verdicts.includes(x)) : [...d.funda.verdicts],
+      yieldMin: num(f.yieldMin, d.funda.yieldMin, LIMITS.yieldMin),
     },
   };
 }
@@ -100,4 +101,4 @@ export const macroMatch = (r: MacroRow, f: MacroFilter) => f.trend === 'any' || 
 export const quantMatch = (r: QuantRow, f: QuantFilter) => r.signal !== 'none' && f.signals.includes(r.signal);
 export const turtleMatch = (t: TurtleState, f: TechFilter) =>
   f.pos === 'any' || (f.pos === 'open' ? t.pos !== 0 : f.pos === 'long' ? t.pos === 1 : t.pos === -1);
-export const fundaMatch = (x: Fundamentals, f: FundaFilter) => f.verdicts.includes(x.verdict);
+export const fundaMatch = (x: Fundamentals, f: FundaFilter) => f.verdicts.includes(x.verdict) && (f.yieldMin <= 0 || (x.yieldPct ?? 0) >= f.yieldMin);

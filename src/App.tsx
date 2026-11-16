@@ -7,17 +7,19 @@ import { Trading } from './Trading';
 import { errorText } from './lib/http';
 import { loadFilters, saveFilters, type Filters } from './lib/filters';
 import { gatewayBase, gatewayError, ibkrAccounts } from './lib/ibkr';
-import { getFx, getQuote, getSeries, isIndexSymbol, lookupName, majorCurrency, toLocal, type Fx, type LocalPrice, type Quote, type Range, type Series } from './lib/market';
+import { getFx, getQuote, getSeries, isIndexSymbol, lookupName, majorCurrency, toLocal, type Fx, type LocalPrice, type Quote, type Range, type Series, dividendSummary, getDividends, type Dividend } from './lib/market';
 import { CATEGORY_NAME, GROUPS, groupOf, MARKET_DAYS, marketNews, tickerNews, type Category, type Group, type NewsItem } from './lib/news';
 import { aggregate, type Label } from './lib/sentiment';
 import { applyBackup, describeBackup, makeBackup, readBackup, shareBackup, type Backup } from './lib/backup';
 import { loadSecret, removeSecret, saveSecret, syncAlerts, syncWidgetPaper, syncWidgetWatchlist, takeNavTab } from './lib/native';
+import { checkStrategies } from './lib/strategyRun';
 import { wiseErrorText, wiseProfiles, type WiseLink } from './lib/wise';
-import { cleanSymbol, CURRENCIES, holdingFor, labelOf, loadPaper, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
+import { WiseView } from './Wise';
+import { cleanSymbol, CURRENCIES, holdingFor, isFuture, labelOf, loadPaper, loadSettings, loadWatchlist, saveSettings, saveWatchlist, type Holding, type Settings } from './lib/store';
 
 type Tab = 'watchlist' | 'screener' | 'news' | 'trading' | 'settings';
 const TABS: Tab[] = ['watchlist', 'screener', 'news', 'trading', 'settings'];
-const TAB_NAME: Record<Tab, string> = { watchlist: 'Watchlist', screener: 'Screener', news: 'Market news', trading: 'Trading', settings: 'Settings' };
+const TAB_NAME: Record<Tab, string> = { watchlist: 'Watchlist', screener: 'Screener', news: 'Market news', trading: 'Trading', settings: 'Profile' };
 type Load<T> = { data?: T; error?: string; loading: boolean; at?: number };
 
 const money = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -174,6 +176,20 @@ export default function App() {
   }, []);
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
+  // Paper strategies: checked when the app opens and every minute while it is open.
+  const [toast, setToast] = useState('');
+  useEffect(() => {
+    let live = true;
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      checkStrategies(key).then((fired) => {
+        if (live && fired.length) { setToast(fired.map((f) => f.text).join(' ')); setTimeout(() => live && setToast(''), 8000); }
+      }).catch(() => undefined);
+    };
+    tick();
+    const t = setInterval(tick, 60_000);
+    return () => { live = false; clearInterval(t); };
+  }, [key]);
   // Keep the home-screen widget and the background alert job in step with the app.
   useEffect(() => { syncWidgetWatchlist(list); }, [list]);
   useEffect(() => { syncWidgetPaper(loadPaper()); }, []);
@@ -361,9 +377,10 @@ export default function App() {
           </>
         )}
         {tab === 'screener' && <Screener list={list} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} finnhubKey={key} onSettings={() => setTab('settings')} info={settings.showInfo} onToggleInfo={toggleInfo} filters={filters} onFilters={updateFilters} />}
-        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} info={settings.showInfo} onToggleInfo={toggleInfo} gateway={settings.ibkrUrl} wise={wise} onSettings={() => setTab('settings')} />}
+        {tab === 'trading' && <Trading list={list} finnhubKey={key} onOpen={(sym) => go(`t/${encodeURIComponent(sym)}`)} info={settings.showInfo} onToggleInfo={toggleInfo} gateway={settings.ibkrUrl} onSettings={() => setTab('settings')} />}
         {tab === 'settings' && <SettingsView settings={settings} onChange={updateSettings} wise={wise} onWise={setWise} />}
       </main>
+      {toast && <div className="toast" role="status" onClick={() => setToast('')}>{toast}</div>}
       <nav className="tabs" aria-label="Sections">
         {TABS.map((t) => (
           <button key={t} aria-current={tab === t ? 'page' : undefined} onClick={() => { setTab(t); setEditing(false); }}>
@@ -467,6 +484,7 @@ function Detail(p: {
         {series.data ? <Chart series={series.data} range={range} />
           : <div className="chart"><div className={`empty ${series.loading ? 'spin' : ''}`}>{series.loading ? 'Loading chart' : series.error}</div></div>}
 
+        {!isFuture(symbol) && !isIndexSymbol(symbol) && <Dividends symbol={symbol} price={q?.price ?? 0} />}
         {p.news?.data && <MoodCard items={p.news.data} hideLow={p.hideLow} title="News mood, last 4 days" />}
         <div className="section-h">
           <h2>Headlines</h2>
@@ -519,6 +537,10 @@ function SettingsView({ settings, onChange, wise, onWise }: { settings: Settings
     onChange({ ...settings, notify: on });
   };
   return (
+    <>
+    <div className="section-h"><h2>Wallet</h2><span className="hint">Wise</span></div>
+    <WiseView link={wise} onSettings={() => document.getElementById('wise')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} info={settings.showInfo} />
+    <div className="section-h"><h2>Connections and settings</h2></div>
     <div className="settings">
       <div className="field">
         <label htmlFor="fh">Finnhub API key (optional)</label>
@@ -581,6 +603,7 @@ function SettingsView({ settings, onChange, wise, onWise }: { settings: Settings
         treat it as a rough signal. Prices can be delayed. This app is for information only and is not investment advice.
       </p>
     </div>
+    </>
   );
 }
 
@@ -684,5 +707,29 @@ function BackupSettings() {
         OneDrive, Gmail or anywhere else. API keys and tokens are left out.
       </p>
     </div>
+  );
+}
+
+function Dividends({ symbol, price }: { symbol: string; price: number }) {
+  const [divs, setDivs] = useState<Dividend[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    setDivs(null);
+    getDividends(symbol).then((d) => live && setDivs(d)).catch(() => live && setDivs([]));
+    return () => { live = false; };
+  }, [symbol]);
+  if (!divs) return null;
+  const date = (t: number) => new Date(t).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  if (!divs.length) return <p className="note">No cash dividends in the last two years.</p>;
+  const s = dividendSummary(divs, price);
+  return (
+    <>
+      <div className="section-h"><h2>Dividends</h2><span className="hint">{s.perYear ? `${s.perYear} in the last 12 months` : 'none in the last 12 months'}</span></div>
+      <dl className="kv one num pad-x">
+        <div><dt>Paid in the last 12 months</dt><dd>{money(s.total)} per share</dd></div>
+        {price > 0 && s.total > 0 && <div><dt>Yield at today's price</dt><dd>{s.yieldPct.toFixed(2)}%</dd></div>}
+        {s.last && <div><dt>Most recent</dt><dd>{money(s.last.amount)}, ex-date {date(s.last.date)}</dd></div>}
+      </dl>
+    </>
   );
 }

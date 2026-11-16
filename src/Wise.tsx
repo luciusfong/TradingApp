@@ -11,8 +11,8 @@ export function WiseView({ link, onSettings, info }: { link: WiseLink | null; on
     return (
       <div className="empty-state">
         <b>Wise is not connected</b>
-        <span>Add a Wise API token in Settings to see your balances here and draft transfers to your saved bank recipients. You approve and pay each transfer inside Wise.</span>
-        <button className="btn" onClick={onSettings}>Open Settings</button>
+        <span>Add a Wise API token below to see your balances here, draft withdrawals to your saved bank accounts and see the details for depositing. You approve and pay each withdrawal inside Wise.</span>
+        <button className="btn" onClick={onSettings}>Add token</button>
       </div>
     );
   }

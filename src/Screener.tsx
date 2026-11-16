@@ -203,6 +203,7 @@ function FilterPanel({ mode, f, set, reset }: {
             <Num label="Return on equity at least" unit="%" value={f.funda.roeMin} range={LIMITS.roeMin} onChange={(roeMin) => set('funda', { roeMin })} />
             <Num label="Net margin at least" unit="%" value={f.funda.marginMin} range={LIMITS.marginMin} onChange={(marginMin) => set('funda', { marginMin })} />
             <Num label="Debt to equity at most" step={0.1} value={f.funda.debtMax} range={LIMITS.debtMax} onChange={(debtMax) => set('funda', { debtMax })} />
+            <Num label="Dividend yield at least" unit="%" step={0.5} value={f.funda.yieldMin} range={LIMITS.yieldMin} onChange={(yieldMin) => set('funda', { yieldMin })} />
           </div>
         </>
       )}
@@ -592,6 +593,7 @@ function Fundamental(p: {
               <span>ROE {f1(f.roe, '%')}</span>
               <span>Margin {f1(f.margin, '%')}</span>
               <span>Debt/equity {f.debtEquity === null ? '—' : f.debtEquity.toFixed(2)}</span>
+              <span>Dividend {f.yieldPct ? `${f.yieldPct.toFixed(1)}%` : 'none'}</span>
             </span>
           )}
         </button>

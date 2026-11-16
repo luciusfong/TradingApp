@@ -134,3 +134,25 @@ export function toLocal(q: { price: number; prevClose: number }, fx: Fx, scale =
   const prev = q.prevClose * scale * fx.prev;
   return { price, change: price - prev, changePct: prev ? (price / prev - 1) * 100 : 0 };
 }
+
+// ---------- Dividends ----------
+
+export interface Dividend { date: number; amount: number } // date in ms
+export function parseDividends(data: any): Dividend[] {
+  const ev = data?.chart?.result?.[0]?.events?.dividends;
+  if (!ev || typeof ev !== 'object') return [];
+  return Object.values(ev)
+    .map((d: any) => ({ date: Number(d?.date) * 1000, amount: Number(d?.amount) }))
+    .filter((d) => isFinite(d.date) && d.date > 0 && isFinite(d.amount) && d.amount > 0)
+    .sort((a, b) => b.date - a.date);
+}
+/** Cash dividends paid in the last two years, newest first. */
+export async function getDividends(symbol: string): Promise<Dividend[]> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1mo&events=div&includePrePost=false`;
+  return parseDividends(await httpGet(url, 'json'));
+}
+export function dividendSummary(divs: Dividend[], price: number, now = Date.now()) {
+  const year = divs.filter((d) => now - d.date <= 360 * 864e5);
+  const total = year.reduce((s, d) => s + d.amount, 0);
+  return { total, yieldPct: price > 0 ? (total / price) * 100 : 0, perYear: year.length, last: divs[0] ?? null };
+}

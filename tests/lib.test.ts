@@ -309,7 +309,7 @@ describe('news categories', () => {
     expect(groupOf('fda')).toBe('filings');
     expect(groupOf('geopolitical')).toBe('news');
     expect(groupOf('ma')).toBe('corporate');
-    expect(GROUPS.flatMap((g) => g.cats).length).toBe(13);
+    expect(GROUPS.flatMap((g) => g.cats).length).toBe(14);
     expect(groupOf('ipo')).toBe('corporate');
     expect(enrich(parseRss(RSS)).every((n) => !!n.category)).toBe(true);
   });
@@ -569,7 +569,7 @@ describe('private markets news', () => {
     expect(categoryOf('Utility raises $2 billion in bond sale to fund new plants')).toBe('corpfund');
     expect(categoryOf('VC-backed chip designer files for IPO')).toBe('ipo');
     expect(categoryOf('Company converts Series A shares ahead of results')).not.toBe('private');
-    expect(GROUPS.flatMap((g) => g.cats).length).toBe(13);
+    expect(GROUPS.flatMap((g) => g.cats).length).toBe(14);
   });
 });
 
@@ -687,5 +687,83 @@ describe('Wise deposit details', () => {
     ] }]);
     expect(r.notSetUp).toEqual(['EUR']);
     expect(parseAccountDetails(null)).toEqual({ ready: [], notSetUp: [] });
+  });
+});
+
+import { priceOrder, rebalancePlan, runRules, type PriceRule, type RebalanceRule } from '../src/lib/strategy';
+
+describe('strategies', () => {
+  const base = () => {
+    let a = newAccount();
+    a = applyOrder(a, { symbol: 'AAPL', side: 'buy', qty: 100, price: 200 });
+    a = applyOrder(a, { symbol: 'MSFT', side: 'buy', qty: 50, price: 400 });
+    return a; // 20,000 + 20,000 invested, 60,000 cash
+  };
+  const pr = (o: Partial<PriceRule>): PriceRule => ({ id: 'p', kind: 'price', symbol: 'AAPL', takeProfit: 250, stopLoss: 180, qty: null, on: true, created: 0, ...o });
+  it('sells at the target or the stop, once', () => {
+    const a = base();
+    expect(priceOrder(pr({}), a, 240)).toBeNull();
+    expect(priceOrder(pr({}), a, 251)!.order).toEqual({ symbol: 'AAPL', side: 'sell', qty: 100, price: 251 });
+    expect(priceOrder(pr({ qty: 30 }), a, 179)!.why).toMatch(/stop/);
+    expect(priceOrder(pr({ symbol: 'TSLA' }), a, 999)).toBeNull();
+    const r = runRules(a, [pr({ qty: 40 })], { AAPL: 260, MSFT: 400 }, 1);
+    expect(r.account.positions.AAPL.qty).toBe(60);
+    expect(r.account.realized).toBe(2400);
+    expect(r.rules[0].on).toBe(false);
+    expect(runRules(r.account, r.rules, { AAPL: 270 }, 2).fired).toEqual([]);
+  });
+  it('plans whole-share rebalancing within the cash available', () => {
+    const a = base();
+    const plan = rebalancePlan(a, [{ symbol: 'AAPL', weight: 50 }, { symbol: 'MSFT', weight: 10 }], { AAPL: 200, MSFT: 400 });
+    expect(plan.drift).toBeCloseTo(30);
+    expect(plan.orders).toEqual([{ symbol: 'MSFT', side: 'sell', qty: 25, price: 400 }, { symbol: 'AAPL', side: 'buy', qty: 150, price: 200 }]);
+    expect(rebalancePlan(a, [{ symbol: 'AAPL', weight: 50 }, { symbol: 'NVDA', weight: 10 }], { AAPL: 200 }).missing).toEqual(['NVDA']);
+    const tight = rebalancePlan({ ...a, cash: 1000 }, [{ symbol: 'AAPL', weight: 90 }], { AAPL: 200, MSFT: 400 });
+    expect(tight.orders).toEqual([{ symbol: 'AAPL', side: 'buy', qty: 5, price: 200 }]);
+  });
+  it('rebalances automatically only past the drift limit', () => {
+    const a = base();
+    const rule: RebalanceRule = { id: 'r', kind: 'rebalance', targets: [{ symbol: 'AAPL', weight: 20 }, { symbol: 'MSFT', weight: 20 }], drift: 5, auto: true, on: true, created: 0 };
+    expect(runRules(a, [rule], { AAPL: 200, MSFT: 400 }).fired).toEqual([]);
+    const moved = runRules(a, [rule], { AAPL: 300, MSFT: 400 }, 5);
+    expect(moved.fired[0].text).toMatch(/Rebalanced with/);
+    const w = breakdown(moved.account, { AAPL: 300, MSFT: 400 }).rows.find((x) => x.symbol === 'AAPL')!.weight;
+    expect(Math.abs(w - 20)).toBeLessThan(1);
+    expect(runRules(a, [{ ...rule, auto: false }], { AAPL: 300, MSFT: 400 }).fired).toEqual([]);
+    expect(runRules(a, [{ ...rule, auto: false }], { AAPL: 300, MSFT: 400 }, 1, 'r').fired).toHaveLength(1);
+  });
+});
+
+import { dividendSummary, parseDividends } from '../src/lib/market';
+
+describe('dividends', () => {
+  it('files dividend headlines under their own category', () => {
+    expect(categoryOf('Coca-Cola raises quarterly dividend for 63rd straight year')).toBe('dividend');
+    expect(categoryOf('Intel suspends dividend to fund factories')).toBe('dividend');
+    expect(categoryOf('3 high-yield dividend stocks going ex-dividend next week')).toBe('dividend');
+    expect(categoryOf('Apple announces $90 billion share buyback')).toBe('corpfund');
+    expect(groupOf('dividend')).toBe('corporate');
+  });
+  it('reads Yahoo dividend events and sums the last year', () => {
+    const now = Date.UTC(2026, 10, 16);
+    const s = (d: string) => Date.parse(d) / 1000;
+    const divs = parseDividends({ chart: { result: [{ events: { dividends: {
+      a: { amount: 0.26, date: s('2026-08-11') }, b: { amount: 0.26, date: s('2026-05-12') }, c: { amount: 0.25, date: s('2026-02-09') },
+      d: { amount: 0.25, date: s('2025-11-25') }, e: { amount: 0.25, date: s('2025-08-11') }, f: { amount: 'x', date: 1 } } } }] } });
+    expect(divs).toHaveLength(5);
+    expect(divs[0].amount).toBe(0.26);
+    const sum = dividendSummary(divs, 200, now);
+    expect(sum.perYear).toBe(4);
+    expect(sum.total).toBeCloseTo(1.02);
+    expect(sum.yieldPct).toBeCloseTo(0.51);
+    expect(parseDividends({ chart: { result: [{}] } })).toEqual([]);
+  });
+  it('filters fundamentals by a minimum dividend yield', () => {
+    const f = normalizeFilters({ funda: { verdicts: ['garp'], yieldMin: 2 } }).funda;
+    const row: any = { verdict: 'garp', yieldPct: 1.5 };
+    expect(fundaMatch(row, f)).toBe(false);
+    expect(fundaMatch({ ...row, yieldPct: 3 }, f)).toBe(true);
+    expect(fundaMatch({ ...row, yieldPct: null }, normalizeFilters({}).funda)).toBe(true); // no minimum by default
+    expect(normalizeFilters({ funda: { yieldMin: 99 } }).funda.yieldMin).toBe(20);
   });
 });

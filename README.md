@@ -12,11 +12,13 @@ US market data, news sentiment, screens and paper trading for Android. No server
   - Fundamental: Lynch PEG plus Buffett-style quality checks, from Finnhub basic financials (needs the free key).
   - Rules in `src/lib/screen.ts` and `src/lib/fundamentals.ts`.
 - **Screener alerts** (Settings, off by default): about once an hour an Android background job re-runs the Macro, Quant and Technical screens with your filters and notifies you of matches that were not there on its previous run. See "Native code" below.
-- **Market news** with an overall mood score, limited to the last 3 days. Headlines are sorted into categories (`categoryOf` in `src/lib/news.ts`) and rolled up into Filings (SEC filings, FDA approvals, insider, institutional), News (geopolitical, tech, financial, economics), Corporate (M&A, IPOs, private markets, corporate funds) and Other. Private markets covers private equity and venture capital: funding rounds, buyouts, fund raises.
-- **Trading** tab with Paper, Live and Wise.
+- **Market news** with an overall mood score, limited to the last 3 days. Headlines are sorted into categories (`categoryOf` in `src/lib/news.ts`) and rolled up into Filings (SEC filings, FDA approvals, insider, institutional), News (geopolitical, tech, financial, economics), Corporate (M&A, IPOs, private markets, dividends, corporate funds) and Other. Private markets covers private equity and venture capital: funding rounds, buyouts, fund raises.
+- **Trading** tab with Paper and Live.
   - Paper is a $100,000 pretend account (long and short, stocks and the listed futures with contract multipliers, simplified margin, fills at the latest quote) with a position breakdown; logic in `src/lib/paper.ts`.
   - Live is a read-only view of an Interactive Brokers account. It cannot place orders. See "IBKR" below.
-  - Wise shows your Wise balances. Withdraw drafts a transfer to a saved bank recipient; Deposit shows the bank details that pay into each balance, to copy into your bank app. The app cannot pay for a transfer. See "Wise" below.
+  - Strategies (paper only): sell at a target or stop price, and rebalance to target weights, manually or automatically past a drift limit. Checked when the app opens and every minute while it is open; fills at the quote at that moment. `src/lib/strategy.ts`.
+- **Profile** tab: the Wise wallet (balances; Withdraw drafts a transfer to a saved bank recipient, Deposit shows the bank details that pay into each balance; the app cannot pay for a transfer, see "Wise" below), then connections, settings and backup.
+- **Dividends:** a Dividends news category, the last 12 months of payouts and yield on each stock page, and a minimum-yield filter in the Fundamental screen.
 - **Backup** (Settings): saves the watchlist, settings, Screener filters and paper account as a file through Android's share sheet (Google Drive, OneDrive, Gmail and so on) and restores from such a file. Keys and tokens are left out. `src/lib/backup.ts`.
 - **Home-screen widget:** one widget with Watchlist, Positions (paper account) and News tabs. Android widgets cannot be swiped sideways, so tabs are tapped. It fetches quotes and headlines itself about every 30 minutes; tap the time to refresh.
 - **Sentiment** is scored on the phone with a finance word-and-phrase list (`src/lib/sentiment.ts`).
@@ -45,7 +47,7 @@ So the phone needs an HTTPS address with a trusted certificate that lives on tha
 
 ## Wise
 
-The Wise tab works with a personal API token, created in Wise under Settings, Integrations and tools, API tokens. The code is `src/lib/wise.ts`.
+The Wise wallet (Profile tab) works with a personal API token, created in Wise under Settings, Integrations and tools, API tokens. The code is `src/lib/wise.ts`.
 
 What it does: lists profiles, balances and saved recipients, asks Wise for a quote, creates the transfer (which Wise holds as "waiting for payment"), lists such drafts and cancels one. What it cannot do: pay for a transfer. `wise.ts` contains no funding call, so money moves only when you open Wise and pay for the draft there; Wise cancels drafts left unpaid. New recipients are added in Wise, not in the app, and routes that need extra details (a transfer purpose, for instance) have to be made in Wise.
 

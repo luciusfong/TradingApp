@@ -87,17 +87,17 @@ export function eventOf(text: string): string | null {
   return null;
 }
 
-export type Category = 'sec' | 'fda' | 'insider' | 'institutional' | 'geopolitical' | 'tech' | 'financial' | 'economics' | 'ma' | 'ipo' | 'private' | 'corpfund' | 'other';
+export type Category = 'sec' | 'fda' | 'insider' | 'institutional' | 'geopolitical' | 'tech' | 'financial' | 'economics' | 'ma' | 'ipo' | 'private' | 'dividend' | 'corpfund' | 'other';
 export type Group = 'filings' | 'news' | 'corporate' | 'other';
 export const CATEGORY_NAME: Record<Category, string> = {
   sec: 'SEC filings', fda: 'FDA approvals', insider: 'Insider', institutional: 'Institutional',
   geopolitical: 'Geopolitical', tech: 'Tech', financial: 'Financial', economics: 'Economics',
-  ma: 'M&A', ipo: 'IPOs', private: 'Private markets', corpfund: 'Corporate funds', other: 'Other',
+  ma: 'M&A', ipo: 'IPOs', private: 'Private markets', dividend: 'Dividends', corpfund: 'Corporate funds', other: 'Other',
 };
 export const GROUPS: { id: Group; name: string; cats: Category[] }[] = [
   { id: 'filings', name: 'Filings', cats: ['sec', 'fda', 'insider', 'institutional'] },
   { id: 'news', name: 'News', cats: ['geopolitical', 'tech', 'financial', 'economics'] },
-  { id: 'corporate', name: 'Corporate', cats: ['ma', 'ipo', 'private', 'corpfund'] },
+  { id: 'corporate', name: 'Corporate', cats: ['ma', 'ipo', 'private', 'dividend', 'corpfund'] },
   { id: 'other', name: 'Other', cats: ['other'] },
 ];
 export const groupOf = (c: Category): Group => GROUPS.find((g) => g.cats.includes(c))!.id;
@@ -112,7 +112,8 @@ const CATEGORIES: [Category, RegExp][] = [
   // Private equity and venture capital: funding rounds, buyout firms, fund raises. Above M&A so a buyout by a private-equity firm lands here.
   ['private', /\bprivate[- ]equity\b|\bventure[- ]capital\b|\bvc[- ]backed\b|\bvcs\b|\b(funding|financing|seed|pre-seed) round\b|\bseries [a-h]\b(?! shares)|\b(raises|raised|secures|secured|lands|landed) \$[\d.,]+ ?(billion|million|bn|mn|b|m)\b.{0,60}\b(round|valuation)\b|\b(closes|closed) .{0,40}\bfund\b|\bat an? \$[\d.,]+ ?(billion|million|bn|b|m)? ?valuation|\bunicorns?\b|\btake[- ]private\b|\bleveraged buyout|\blbo\b|\bbuyout (firm|fund|group|shop)s?\b|\bgrowth equity\b|\b(blackstone|kkr|carlyle|apollo global|tpg|thoma bravo|silver lake|bain capital|warburg pincus|advent international|vista equity|hellman & friedman|cvc capital|sequoia|andreessen horowitz|a16z|y combinator|founders fund|softbank vision fund|general catalyst|lightspeed venture)\b/i],
   ['ma', /\b(acquires?|acquired|acquiring|acquisition|merger|merges?|merged|takeover|buyout|spin[- ]?off|divest\w*|tender offer)\b|\bdeal to (buy|acquire)\b|\b(to|will) (buy|acquire) .{1,50} (for|in) \$/i],
-  ['corpfund', /\b(buybacks?|repurchases?|repurchase program|dividends?|corporate venture|venture arm|capital (return|allocation)|capex|capital expenditures?|bitcoin treasury|treasury strategy|bond (sale|offering)|debt offering|share (sale|offering)|secondary offering)\b|\b(invests?|investing|to invest|commits?|pledges?) \$[\d.,]+ ?(billion|million|bn|mn|b|m)\b/i],
+  ['dividend', /\b(dividends?|ex-dividend|ex-div|payout ratio|dividend (hike|cut|increase|raise|suspension|yield)|special dividend|distribution per share|dividend aristocrats?|dividend kings?|yield stocks?)\b|\b(declares|raises|hikes|cuts|suspends|boosts|lifts|maintains|reinstates|slashes) (its )?(quarterly|monthly|annual|interim|final|special)? ?(cash )?(dividend|payout|distribution)/i],
+  ['corpfund', /\b(buybacks?|repurchases?|repurchase program|corporate venture|venture arm|capital (return|allocation)|capex|capital expenditures?|bitcoin treasury|treasury strategy|bond (sale|offering)|debt offering|share (sale|offering)|secondary offering)\b|\b(invests?|investing|to invest|commits?|pledges?) \$[\d.,]+ ?(billion|million|bn|mn|b|m)\b/i],
   ['geopolitical', /\bgeopolit|\b(war|wars|sanctions?|tariffs?|military|missiles?|invasion|ceasefire|nato|opec\+?|embargo|airstrikes?|coup|summit)\b|\btrade (war|deal|talks|truce|tensions)|\bexport (controls?|bans?|curbs)|\b(china|chinese|russia|russian|ukraine|iran|israel|taiwan|north korea|middle east|gaza|venezuela|beijing|kremlin|strait of hormuz|red sea)\b/i],
   ['economics', /\b(fed|fomc|powell|inflation|cpi|ppi|pce|payrolls|unemployment|jobless|gdp|recession|ecb|boj|pmi|stagflation|economy|economic|economists?)\b|\bfederal reserve|\binterest rates?\b|\brate (cut|hike)s?\b|\bjobs report|\btreasury yields?|\bcentral banks?\b|\bbank of (england|japan|canada)|\bconsumer (spending|confidence|sentiment|prices)|\bretail sales|\bhousing starts/i],
   ['tech', /\b(ai|chips?|chipmakers?|semiconductors?|software|cloud|cyberattack|cybersecurity|iphone|android|robotaxi|robots?|robotics|quantum|startups?|big tech|nvidia|apple|microsoft|google|alphabet|meta|amazon|tesla|openai|anthropic|amd|intel|tsmc|broadcom|oracle|palantir|netflix|samsung|qualcomm)\b|\bartificial intelligence|\bdata cent(er|re)s?\b|\btech (stocks?|giants?|sector|shares)/i],
@@ -223,6 +224,7 @@ export async function marketNews(): Promise<NewsItem[]> {
     fetchRss(`merger OR acquisition OR buyout OR "share buyback" when:${MARKET_DAYS}d`),
     fetchRss(`IPO OR "initial public offering" OR "goes public" OR "market debut" when:${MARKET_DAYS}d`),
     fetchRss(`"private equity" OR "venture capital" OR "funding round" OR buyout when:${MARKET_DAYS}d`),
+    fetchRss(`dividend OR "ex-dividend" OR "dividend hike" OR "dividend cut" when:${MARKET_DAYS}d`),
     fetchRss(`geopolitical OR sanctions OR tariffs markets when:${MARKET_DAYS}d`),
     fetchRss(`AI OR semiconductor OR "big tech" stocks when:${MARKET_DAYS}d`),
   ]);
