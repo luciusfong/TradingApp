@@ -16,7 +16,7 @@ US market data, news sentiment, screens and paper trading for Android. No server
 - **Trading** tab with Paper, Live and Wise.
   - Paper is a $100,000 pretend account (long and short, stocks and the listed futures with contract multipliers, simplified margin, fills at the latest quote) with a position breakdown; logic in `src/lib/paper.ts`.
   - Live is a read-only view of an Interactive Brokers account. It cannot place orders. See "IBKR" below.
-  - Wise shows your Wise balances and drafts a transfer to a saved bank recipient. The app cannot pay for a transfer. See "Wise" below.
+  - Wise shows your Wise balances. Withdraw drafts a transfer to a saved bank recipient; Deposit shows the bank details that pay into each balance, to copy into your bank app. The app cannot pay for a transfer. See "Wise" below.
 - **Backup** (Settings): saves the watchlist, settings, Screener filters and paper account as a file through Android's share sheet (Google Drive, OneDrive, Gmail and so on) and restores from such a file. Keys and tokens are left out. `src/lib/backup.ts`.
 - **Home-screen widget:** one widget with Watchlist, Positions (paper account) and News tabs. Android widgets cannot be swiped sideways, so tabs are tapped. It fetches quotes and headlines itself about every 30 minutes; tap the time to refresh.
 - **Sentiment** is scored on the phone with a finance word-and-phrase list (`src/lib/sentiment.ts`).

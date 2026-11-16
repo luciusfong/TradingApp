@@ -551,7 +551,7 @@ describe('local currency', () => {
 });
 
 import { applyBackup, backupName, describeBackup, makeBackup, readBackup } from '../src/lib/backup';
-import { parseBalances, parseProfiles, parseQuote, parseRecipients, parseTransfer, parseTransfers, wiseMessage } from '../src/lib/wise';
+import { parseAccountDetails, parseBalances, parseProfiles, parseQuote, parseRecipients, parseTransfer, parseTransfers, wiseMessage } from '../src/lib/wise';
 
 describe('private markets news', () => {
   it('files private equity and venture capital headlines', () => {
@@ -668,5 +668,24 @@ describe('backup', () => {
     expect(readBackup('hello')).toEqual({ error: 'This file is not a TradingApp backup.' });
     expect(readBackup(JSON.stringify({ app: 'Other', kind: 'backup', version: 1, data: {} }))).toHaveProperty('error');
     expect(readBackup(JSON.stringify({ app: 'TradingApp', kind: 'backup', version: 2, savedAt: '', data: {} }))).toEqual({ error: 'This backup was made by a newer version of TradingApp. Update the app, then restore.' });
+  });
+});
+
+describe('Wise deposit details', () => {
+  it('keeps issued details and lists sample-only currencies as not set up', () => {
+    const r = parseAccountDetails([
+      { id: 1, currency: { code: 'USD', name: 'US dollar' }, status: 'ACTIVE', deprecated: false, receiveOptions: [
+        { type: 'LOCAL', title: 'Local', details: [{ type: 'ACCOUNT_HOLDER', title: 'Name', body: 'Test User', hidden: false }, { type: 'ACCOUNT_NUMBER', title: 'Account number', body: '8310006087', hidden: false }, { type: 'X', title: 'Internal', body: 'x', hidden: true }] },
+        { type: 'INTERNATIONAL', title: 'SWIFT', details: [{ title: 'SWIFT/BIC', body: 'CMFGUS33' }] },
+      ] },
+      { id: null, currency: { code: 'EUR', name: 'Euro' }, status: 'AVAILABLE', receiveOptions: [{ type: 'LOCAL', details: [{ title: 'IBAN', body: 'BE00 0000 0000 0000' }] }] },
+      { id: 3, currency: { code: 'GBP' }, status: 'ACTIVE', deprecated: true, receiveOptions: [] },
+    ]);
+    expect(r.ready).toEqual([{ currency: 'USD', name: 'US dollar', options: [
+      { type: 'LOCAL', title: 'Local', fields: [{ label: 'Name', value: 'Test User' }, { label: 'Account number', value: '8310006087' }] },
+      { type: 'INTERNATIONAL', title: 'SWIFT', fields: [{ label: 'SWIFT/BIC', value: 'CMFGUS33' }] },
+    ] }]);
+    expect(r.notSetUp).toEqual(['EUR']);
+    expect(parseAccountDetails(null)).toEqual({ ready: [], notSetUp: [] });
   });
 });

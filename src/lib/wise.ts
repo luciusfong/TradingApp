@@ -213,3 +213,36 @@ export function newKey(): string {
     return (c === 'x' ? r : (r % 4) + 8).toString(16);
   });
 }
+
+// ---------- Deposit: the bank details that pay into a Wise balance ----------
+
+export interface WiseReceiveField { label: string; value: string }
+export interface WiseReceiveOption { type: 'LOCAL' | 'INTERNATIONAL'; title: string; fields: WiseReceiveField[] }
+export interface WiseAccountDetails { currency: string; name: string; options: WiseReceiveOption[] }
+
+// Wise also returns sample details (id null) for currencies the user has not
+// set up. Those are not real accounts, so only issued, active ones are kept.
+export function parseAccountDetails(d: any): { ready: WiseAccountDetails[]; notSetUp: string[] } {
+  const ready: WiseAccountDetails[] = [];
+  const notSetUp: string[] = [];
+  if (!Array.isArray(d)) return { ready, notSetUp };
+  for (const a of d) {
+    const currency = str(a?.currency?.code) || str(a?.currency);
+    if (!currency || a?.deprecated === true) continue;
+    if (num(a?.id) === null || str(a?.status).toUpperCase() !== 'ACTIVE') {
+      if (!notSetUp.includes(currency)) notSetUp.push(currency);
+      continue;
+    }
+    const options: WiseReceiveOption[] = [];
+    for (const o of Array.isArray(a?.receiveOptions) ? a.receiveOptions : []) {
+      const type = str(o?.type).toUpperCase() === 'INTERNATIONAL' ? 'INTERNATIONAL' : 'LOCAL';
+      const fields = (Array.isArray(o?.details) ? o.details : [])
+        .filter((f: any) => f?.hidden !== true && str(f?.title) && str(f?.body))
+        .map((f: any) => ({ label: str(f.title), value: str(f.body) }));
+      if (fields.length) options.push({ type, title: str(o?.title) || (type === 'LOCAL' ? 'Local details' : 'International details'), fields });
+    }
+    if (options.length) ready.push({ currency, name: str(a?.currency?.name), options });
+  }
+  return { ready, notSetUp: notSetUp.filter((c) => !ready.some((r) => r.currency === c)) };
+}
+export const wiseAccountDetails = async (link: WiseLink, profileId: number) => parseAccountDetails(await call(link, 'GET', `/v1/profiles/${profileId}/account-details`));

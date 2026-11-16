@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  newKey, wiseBalances, wiseCancel, wiseDraft, wiseDrafts, wiseErrorText, wiseProfiles, wiseQuote, wiseRecipients, wiseSite,
-  type WiseBalance, type WiseLink, type WiseProfile, type WiseQuote, type WiseRecipient, type WiseTransfer,
+  newKey, wiseAccountDetails, wiseBalances, wiseCancel, wiseDraft, wiseDrafts, wiseErrorText, wiseProfiles, wiseQuote, wiseRecipients, wiseSite,
+  type WiseAccountDetails, type WiseBalance, type WiseLink, type WiseProfile, type WiseQuote, type WiseRecipient, type WiseTransfer,
 } from './lib/wise';
 
 const money = (v: number | null) => (v === null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
@@ -25,6 +25,7 @@ function Connected({ link, info }: { link: WiseLink; info: boolean }) {
   const [balances, setBalances] = useState<WiseBalance[]>([]);
   const [recipients, setRecipients] = useState<WiseRecipient[]>([]);
   const [drafts, setDrafts] = useState<WiseTransfer[]>([]);
+  const [mode, setMode] = useState<'withdraw' | 'deposit'>('withdraw');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -145,7 +146,14 @@ function Connected({ link, info }: { link: WiseLink; info: boolean }) {
       )}
       {!loading && !error && balances.length === 0 && <p className="note">This Wise profile has no balances.</p>}
 
-      {!error && (balances.length > 0 || recipients.length > 0) && (
+      {!error && profileId !== null && (
+        <div className="ranges" role="group" aria-label="Direction">
+          <button aria-pressed={mode === 'withdraw'} onClick={() => setMode('withdraw')}>Withdraw to bank</button>
+          <button aria-pressed={mode === 'deposit'} onClick={() => setMode('deposit')}>Deposit to Wise</button>
+        </div>
+      )}
+      {mode === 'deposit' && !error && profileId !== null && <Deposit link={link} profileId={profileId} />}
+      {mode === 'withdraw' && !error && (balances.length > 0 || recipients.length > 0) && (
         <>
           <div className="section-h"><h2>Send to a bank account</h2><span className="hint">Draft only</span></div>
           {recipients.length === 0 ? (
@@ -178,9 +186,9 @@ function Connected({ link, info }: { link: WiseLink; info: boolean }) {
           )}
         </>
       )}
-      {formError && <div className="err">{formError}</div>}
+      {mode === 'withdraw' && formError && <div className="err">{formError}</div>}
 
-      {quote && recipient && (
+      {mode === 'withdraw' && quote && recipient && (
         <div className="card">
           <dl className="kv one num">
             <div><dt>You send</dt><dd>{money(quote.sourceAmount)} {quote.sourceCurrency}</dd></div>
@@ -235,6 +243,48 @@ function Connected({ link, info }: { link: WiseLink; info: boolean }) {
           is the one shown in Wise when you pay. New recipients are added in Wise, not here.
         </p>
       )}
+    </>
+  );
+}
+
+// Deposit: show the bank details that pay into each Wise balance, to copy into a bank app.
+function Deposit({ link, profileId }: { link: WiseLink; profileId: number }) {
+  const [data, setData] = useState<{ ready: WiseAccountDetails[]; notSetUp: string[] } | null>(null);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState('');
+  useEffect(() => {
+    let live = true;
+    setData(null);
+    setError('');
+    wiseAccountDetails(link, profileId).then((d) => { if (live) setData(d); }).catch((e) => { if (live) setError(wiseErrorText(e)); });
+    return () => { live = false; };
+  }, [link, profileId]);
+  const copy = (key: string, text: string) => {
+    navigator.clipboard?.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(''), 1500); }).catch(() => undefined);
+  };
+  if (error) return <div className="err">{error}</div>;
+  if (!data) return <p className="note">Loading</p>;
+  return (
+    <>
+      <p className="note">To add money, send a bank transfer from your bank's app to these details. The app cannot pull money from your bank.</p>
+      {data.ready.length === 0 && <p className="note">No account details are set up on this Wise profile yet. Set them up for a currency in Wise; they will then appear here.</p>}
+      {data.ready.map((a) => a.options.map((o) => (
+        <div key={a.currency + o.type}>
+          <div className="section-h"><h2>{a.currency}{a.name ? `, ${a.name}` : ''}</h2><span className="hint">{o.type === 'LOCAL' ? 'From a local bank' : 'From abroad (SWIFT)'}</span></div>
+          <ul className="ledger">
+            {o.fields.map((f) => {
+              const key = `${a.currency}${o.type}${f.label}`;
+              return (
+                <li key={key} className="trade num">
+                  <span><span className="flat">{f.label}</span><br /><b>{f.value}</b></span>
+                  <button className="link" onClick={() => copy(key, f.value)}>{copied === key ? 'Copied' : 'Copy'}</button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )))}
+      {data.notSetUp.length > 0 && <p className="note">Not set up yet in Wise: {data.notSetUp.join(', ')}.</p>}
     </>
   );
 }
