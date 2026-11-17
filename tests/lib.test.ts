@@ -767,3 +767,4 @@ describe('dividends', () => {
     expect(normalizeFilters({ funda: { yieldMin: 99 } }).funda.yieldMin).toBe(20);
   });
 });
+

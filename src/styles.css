@@ -301,3 +301,7 @@ div.qrow { cursor: default; }
 .wform > .row2:last-child { grid-template-columns: 1fr 1fr; }
 .toast { position: fixed; left: 12px; right: 12px; bottom: 72px; z-index: 20; background: var(--ink); color: var(--paper); padding: 12px 14px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
 .pad-x { margin: 0 18px; }
+
+.signin { display: grid; gap: 8px; padding: 4px 18px 10px; }
+.signin .btn[aria-disabled='true'] { opacity: 0.55; }
+.signin .help { margin: 2px 0 0; }

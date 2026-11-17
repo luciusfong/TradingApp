@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "test": "vitest run",
-    "test:native": "javac -d /tmp/ta-native native/java/Screens.java native/test/CrossCheck.java && java -cp /tmp/ta-native com.zlhng.tradingapp.CrossCheck native/test/fixture.txt"
+    "test:native": "javac -d /tmp/ta-native native/java/Screens.java native/java/Strategies.java native/test/CrossCheck.java native/test/StrategyCrossCheck.java && java -cp /tmp/ta-native com.zlhng.tradingapp.CrossCheck native/test/fixture.txt && java -cp /tmp/ta-native com.zlhng.tradingapp.StrategyCrossCheck native/test/strategy-fixture.txt"
   },
   "keywords": [],
   "author": "",

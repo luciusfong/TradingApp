@@ -19,11 +19,19 @@ public class MainActivity extends BridgeActivity {
         noteTab(intent);
     }
 
+    // While the app is on screen it runs the paper strategies itself, so the background job stands aside.
+    @Override
+    public void onResume() {
+        super.onResume();
+        StrategyCheck.setForeground(this, true);
+    }
+
     // Leaving the app: push the latest watchlist and paper account to the home-screen widget,
-    // and bring the background alert schedule in line with the settings.
+    // and bring the background schedule (alerts, strategies) in line with the settings.
     @Override
     public void onPause() {
         super.onPause();
+        StrategyCheck.setForeground(this, false);
         TradingWidget.refreshFromApp(this);
         ScreenerJob.sync(this);
     }

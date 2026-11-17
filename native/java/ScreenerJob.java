@@ -7,7 +7,11 @@ import android.app.job.JobService;
 import android.content.ComponentName;
 import android.content.Context;
 
-/** Runs ScreenerCheck about once an hour while Screener alerts are switched on, including after a restart of the phone. */
+/**
+ * About once an hour, including after a restart of the phone: checks the Screener filters
+ * (ScreenerCheck) when alerts are on, and runs the paper strategies (StrategyCheck) when
+ * background strategies are on and a rule is active.
+ */
 public class ScreenerJob extends JobService {
     private static final int HOURLY = 4101;
     private static final int ONCE = 4102;
@@ -18,10 +22,13 @@ public class ScreenerJob extends JobService {
         try {
             JobScheduler js = (JobScheduler) c.getSystemService(Context.JOB_SCHEDULER_SERVICE);
             if (js == null) return;
-            if (!ScreenerCheck.enabled(c)) {
-                js.cancel(HOURLY);
+            boolean alerts = ScreenerCheck.enabled(c);
+            if (!alerts) {
                 js.cancel(ONCE);
                 ScreenerCheck.forget(c);
+            }
+            if (!alerts && !StrategyCheck.enabled(c)) {
+                js.cancel(HOURLY);
                 return;
             }
             ComponentName me = new ComponentName(c, ScreenerJob.class);
@@ -34,7 +41,7 @@ public class ScreenerJob extends JobService {
                 }
             }
             // New or changed symbols or filters: record what matches now, instead of waiting for the next hourly run.
-            if (ScreenerCheck.needsBaseline(c) && js.getPendingJob(ONCE) == null) {
+            if (alerts && ScreenerCheck.needsBaseline(c) && js.getPendingJob(ONCE) == null) {
                 js.schedule(new JobInfo.Builder(ONCE, me).setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setOverrideDeadline(5 * 60 * 1000L).build());
             }
         } catch (Exception ignored) {
@@ -48,6 +55,7 @@ public class ScreenerJob extends JobService {
         new Thread(() -> {
             try {
                 ScreenerCheck.run(app);
+                if (params.getJobId() == HOURLY) StrategyCheck.run(app);
             } finally {
                 jobFinished(params, false);
             }

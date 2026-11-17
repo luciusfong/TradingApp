@@ -52,6 +52,7 @@ export function Strategies({ acct, prices, finnhubKey, info }: { acct: Account; 
                 {r.kind === 'price' ? <PriceText r={r} /> : <RebalanceText r={r} acct={acct} prices={prices} />}
                 <br />
                 <span className={r.on ? 'pos' : 'flat'}>{r.on ? 'Active' : r.kind === 'price' ? 'Done or paused' : 'Paused'}</span>
+                {r.kind === 'rebalance' && r.last && <span className="flat"> · last rebalanced {when(r.last)}</span>}
               </span>
               <span className="acts">
                 {r.kind === 'rebalance' && r.on && <button className="link" disabled={busy !== ''} onClick={() => runNow(r.id)}>{busy === r.id ? 'Working' : 'Rebalance now'}</button>}
@@ -67,15 +68,16 @@ export function Strategies({ acct, prices, finnhubKey, info }: { acct: Account; 
           <div className="section-h"><h2>Strategy activity</h2></div>
           <ul className="ledger">
             {log.slice(0, 8).map((f, i) => (
-              <li key={`${f.time}-${i}`} className="trade num"><span className={f.ok ? '' : 'neg'}>{f.text}</span><span className="flat">{when(f.time)}</span></li>
+              <li key={`${f.time}-${i}`} className="trade num"><span className={f.ok ? '' : 'neg'}>{f.text}</span><span className="flat">{when(f.time)}{f.bg ? ' · background' : ''}</span></li>
             ))}
           </ul>
         </>
       )}
       {info && (
         <p className="fine pad">
-          Strategies act on the paper account only. They are checked when the app opens and every minute while it is open, and fill at the
-          quote at that moment, which can be past your price if it moved quickly or the app was closed. For real money, set a limit or stop
+          Strategies act on the paper account only. They are checked every minute while the app is open and, if background strategies are on
+          in Profile, about once an hour while it is closed (Android may delay that by hours when the phone is idle). Each fills at the quote at
+          that moment, which can be well past your price. For real money, set a limit or stop
           order with your broker instead: the broker watches the price even when your phone is off.
         </p>
       )}

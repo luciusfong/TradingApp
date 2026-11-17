@@ -1,3 +1,4 @@
+import { localChanged } from './mirror';
 import { newAccount, type Account } from './paper';
 export interface Holding { symbol: string; name?: string; label?: string; q?: string; mult?: number } // mult: dollars per point for one futures contract
 
@@ -29,6 +30,7 @@ export interface Settings {
   showInfo: boolean; // explanations of the screens and financial terms
   notify: boolean; // background alerts for new Screener matches
   ibkrUrl: string; // address of the IBKR Client Portal Gateway
+  bgStrategies: boolean; // run paper strategies in the background
   currency: string; // also show prices in this currency; empty for off
 }
 export const CURRENCIES: [string, string][] = [
@@ -63,7 +65,7 @@ export function loadWatchlist(): Holding[] {
   return list;
 }
 export const saveWatchlist = (w: Holding[]) => write('ta.watchlist', w);
-export const loadSettings = () => ({ finnhubKey: '', hideLowValue: true, showInfo: false, notify: false, ibkrUrl: '', currency: '', ...read<Partial<Settings>>('ta.settings', {}) });
+export const loadSettings = () => ({ finnhubKey: '', hideLowValue: true, showInfo: false, notify: false, ibkrUrl: '', currency: '', bgStrategies: true, ...read<Partial<Settings>>('ta.settings', {}) });
 export const saveSettings = (s: Settings) => write('ta.settings', s);
 
 export function cleanSymbol(input: string): string {
@@ -72,4 +74,4 @@ export function cleanSymbol(input: string): string {
 }
 
 export const loadPaper = (): Account => ({ ...newAccount(), ...read<Partial<Account>>('ta.paper', {}) });
-export const savePaper = (a: Account) => write('ta.paper', a);
+export const savePaper = (a: Account) => { write('ta.paper', a); localChanged(); };

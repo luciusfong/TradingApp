@@ -2,6 +2,7 @@
 // rebalance to target weights. Pure functions, so the maths can be unit-tested.
 // They run inside the app (see useStrategies in src/App.tsx), never on a live account.
 import { applyOrder, breakdown, type Account, type Order } from './paper';
+import { localChanged } from './mirror';
 import { read, write } from './store';
 
 export interface PriceRule {
@@ -18,12 +19,12 @@ export interface RebalanceRule {
   auto: boolean; on: boolean; created: number; last?: number;
 }
 export type Rule = PriceRule | RebalanceRule;
-export interface Fired { ruleId: string; text: string; time: number; ok: boolean }
+export interface Fired { ruleId: string; text: string; time: number; ok: boolean; bg?: boolean } // bg: done by the background job
 
 export const loadRules = (): Rule[] => read<Rule[]>('ta.rules', []);
-export const saveRules = (r: Rule[]) => write('ta.rules', r);
+export const saveRules = (r: Rule[]) => { write('ta.rules', r); localChanged(); };
 export const loadLog = (): Fired[] => read<Fired[]>('ta.rulelog', []);
-export const saveLog = (l: Fired[]) => write('ta.rulelog', l.slice(0, 30));
+export const saveLog = (l: Fired[]) => { write('ta.rulelog', l.slice(0, 30)); localChanged(); };
 
 export const ruleSymbols = (rules: Rule[]) =>
   [...new Set(rules.filter((r) => r.on).flatMap((r) => (r.kind === 'price' ? [r.symbol] : r.targets.map((t) => t.symbol))))];

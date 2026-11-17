@@ -12,6 +12,7 @@ import { CATEGORY_NAME, GROUPS, groupOf, MARKET_DAYS, marketNews, tickerNews, ty
 import { aggregate, type Label } from './lib/sentiment';
 import { applyBackup, describeBackup, makeBackup, readBackup, shareBackup, type Backup } from './lib/backup';
 import { loadSecret, removeSecret, saveSecret, syncAlerts, syncWidgetPaper, syncWidgetWatchlist, takeNavTab } from './lib/native';
+import { adoptBackground, mirrorStrategies, onLocalChange } from './lib/mirror';
 import { checkStrategies } from './lib/strategyRun';
 import { wiseErrorText, wiseProfiles, type WiseLink } from './lib/wise';
 import { WiseView } from './Wise';
@@ -179,17 +180,29 @@ export default function App() {
   // Paper strategies: checked when the app opens and every minute while it is open.
   const [toast, setToast] = useState('');
   useEffect(() => {
-    let live = true;
     const tick = () => {
       if (document.visibilityState !== 'visible') return;
       checkStrategies(key).then((fired) => {
-        if (live && fired.length) { setToast(fired.map((f) => f.text).join(' ')); setTimeout(() => live && setToast(''), 8000); }
+        if (fired.length) { setToast(fired.map((f) => f.text).join(' ')); setTimeout(() => setToast(''), 10000); }
       }).catch(() => undefined);
     };
     tick();
     const t = setInterval(tick, 60_000);
-    return () => { live = false; clearInterval(t); };
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick); };
   }, [key]);
+  // The background job's copy of the account and strategies. Anything it did while the
+  // app was closed is taken over first, so the app's older copy never overwrites it.
+  useEffect(() => {
+    let live = true;
+    let off = () => {};
+    adoptBackground().finally(() => {
+      if (!live) return;
+      mirrorStrategies(settings.bgStrategies);
+      off = onLocalChange(() => mirrorStrategies(settings.bgStrategies));
+    });
+    return () => { live = false; off(); };
+  }, [settings.bgStrategies]);
   // Keep the home-screen widget and the background alert job in step with the app.
   useEffect(() => { syncWidgetWatchlist(list); }, [list]);
   useEffect(() => { syncWidgetPaper(loadPaper()); }, []);
@@ -520,6 +533,17 @@ function SettingsView({ settings, onChange, wise, onWise }: { settings: Settings
     }
   };
   // Android 13 and later only shows notifications after the user allows them.
+  const [bgMsg, setBgMsg] = useState('');
+  const setBg = async (on: boolean) => {
+    setBgMsg('');
+    if (on && Capacitor.isNativePlatform()) {
+      try {
+        const r = await LocalNotifications.requestPermissions();
+        if (r.display !== 'granted') setBgMsg('Strategies will still run, but Android is blocking the notifications. Allow them in Android settings to be told when one acts.');
+      } catch { /* runs without notifications */ }
+    }
+    onChange({ ...settings, bgStrategies: on });
+  };
   const setNotify = async (on: boolean) => {
     setNotifyMsg('');
     if (on && Capacitor.isNativePlatform()) {
@@ -538,6 +562,7 @@ function SettingsView({ settings, onChange, wise, onWise }: { settings: Settings
   };
   return (
     <>
+    <SignIn />
     <div className="section-h"><h2>Wallet</h2><span className="hint">Wise</span></div>
     <WiseView link={wise} onSettings={() => document.getElementById('wise')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} info={settings.showInfo} />
     <div className="section-h"><h2>Connections and settings</h2></div>
@@ -583,6 +608,14 @@ function SettingsView({ settings, onChange, wise, onWise }: { settings: Settings
           {notifyMsg && <p className="help warn">{notifyMsg}</p>}
         </span>
         <input type="checkbox" checked={settings.notify} onChange={(e) => setNotify(e.target.checked)} />
+      </label>
+      <label className="toggle">
+        <span>
+          <b>Paper strategies in the background</b>
+          <p className="help">Runs your target-price and rebalance strategies about once an hour while the app is closed, and notifies you when one acts. Android may delay runs by hours when the phone is idle.</p>
+          {bgMsg && <p className="help warn">{bgMsg}</p>}
+        </span>
+        <input type="checkbox" checked={settings.bgStrategies} onChange={(e) => setBg(e.target.checked)} />
       </label>
       <label className="toggle">
         <span>
@@ -730,6 +763,30 @@ function Dividends({ symbol, price }: { symbol: string; price: number }) {
         {price > 0 && s.total > 0 && <div><dt>Yield at today's price</dt><dd>{s.yieldPct.toFixed(2)}%</dd></div>}
         {s.last && <div><dt>Most recent</dt><dd>{money(s.last.amount)}, ex-date {date(s.last.date)}</dd></div>}
       </dl>
+    </>
+  );
+}
+
+// Sign-in is not set up yet: each provider needs the app registered from the owner's own
+// account first (Google Cloud or Firebase, Microsoft Entra, an Apple developer membership).
+function SignIn() {
+  const [shown, setShown] = useState('');
+  const providers: [string, string][] = [
+    ['Google', 'Needs a Firebase project with this app registered (package name and signing fingerprint).'],
+    ['Microsoft', 'Needs the Firebase project plus an app registration in Microsoft Entra.'],
+    ['Apple', 'Needs a paid Apple developer membership and a Services ID.'],
+  ];
+  return (
+    <>
+      <div className="section-h"><h2>Account</h2><span className="hint">Not set up yet</span></div>
+      <div className="signin">
+        {providers.map(([name, why]) => (
+          <button key={name} className="btn sell" aria-disabled="true" onClick={() => setShown(shown === name ? '' : name)}>
+            Continue with {name}
+          </button>
+        ))}
+        {shown && <p className="help">{providers.find(([n]) => n === shown)![1]} Until then, use Backup below to move your data to another phone.</p>}
+      </div>
     </>
   );
 }

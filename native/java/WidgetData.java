@@ -174,7 +174,7 @@ final class WidgetData {
         }
     }
 
-    private static JSONObject quote(String symbol) throws Exception {
+    static JSONObject quote(String symbol) throws Exception {
         String url = "https://query1.finance.yahoo.com/v8/finance/chart/" + URLEncoder.encode(symbol, "UTF-8")
                 + "?range=1d&interval=5m&includePrePost=false";
         JSONObject meta = new JSONObject(get(url)).getJSONObject("chart").getJSONArray("result").getJSONObject(0).getJSONObject("meta");
